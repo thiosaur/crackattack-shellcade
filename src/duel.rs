@@ -242,7 +242,8 @@ impl Duel {
             } else {
                 ("Enter: play again".to_string(), Tone::Strong)
             };
-            let lines = [result, (tally, Tone::Plain), (String::new(), Tone::Plain), prompt, ("Esc: leave".to_string(), Tone::Hint)];
+            let leave = if self.against_computer_on() { "Q: menu  Esc: leave" } else { "Esc: leave" };
+            let lines = [result, (tally, Tone::Plain), (String::new(), Tone::Plain), prompt, (leave.to_string(), Tone::Hint)];
             render::compose_logo_screen(canvas, &lines);
             return;
         }
@@ -268,6 +269,7 @@ impl Duel {
             other: DuelSide { frame: &self.last[other], hud: self.seats[other].hud(), name: &self.names[other], wins: wins(other) },
             round: session.round_number,
             banner,
+            menu_key: self.against_computer_on(),
         };
         render::compose_duel(canvas, &view);
     }

@@ -21,8 +21,8 @@ const FLIP_TICKS: i32 = 8;
 
 /// The game's keys (mapped in `lib.rs`), as the panel reminds them: (key, action).
 /// Esc belongs to the arcade: it leaves the game.
-const KEYS: [(&str, &str); 5] =
-    [("Arrows", "move"), ("Space", "swap"), ("Enter", "raise"), ("P", "pause"), ("Esc", "leave")];
+const KEYS: [(&str, &str); 6] =
+    [("Arrows", "move"), ("Space", "swap"), ("Enter", "raise"), ("P", "pause"), ("Q", "menu"), ("Esc", "leave")];
 
 /// Panel lines (from the top) of the game info, the chain popup and the logo; the keys
 /// take the last `KEY_LINES`.

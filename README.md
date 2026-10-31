@@ -19,7 +19,8 @@ Le choix entre seul et à deux se fait dans l'arcade : elle propose « Solo »
 
 Dans une salle Solo, un menu sous le logo propose le solo ou un duel contre
 l'ordinateur (l'IA du moteur : Logic, facile, Sigma, moyen, ou Cortex,
-difficile). Dans une salle Duel, le logo n'annonce que l'attente d'un adversaire :
+difficile). Q y ramène au menu depuis une partie ; Échap, depuis le menu ou une
+partie, quitte la salle. Une partie solo perdue se termine sur son score. Dans une salle Duel, le logo n'annonce que l'attente d'un adversaire :
 le duel commence quand il arrive. Un troisième venu regarde.
 
 En local, `tools/shellcade-kit play .` ouvre une salle à deux places (l'attente) ;
@@ -64,7 +65,8 @@ tools/shellcade-kit smoke . -script smoke-solo.yaml
 ## Commandes
 
 Flèches ou WASD : déplacer le curseur · Espace : échanger · Entrée : faire
-monter la pile · P : pause (en solo) · Échap : quitter (géré par l'arcade).
+monter la pile · P : pause (en solo) · Q : retour au menu (salle Solo) ·
+Échap : quitter (géré par l'arcade, qui ne la transmet pas au jeu).
 
 ## Licence
 

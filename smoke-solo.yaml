@@ -14,3 +14,13 @@ steps:
   - rune: "p"
   - advance: 1s
   - shot: paused
+  - rune: "q"
+  - advance: 200ms
+  - shot: back-to-menu
+  - key: down
+  - key: enter
+  - advance: 4s
+  - shot: computer
+  - rune: "q"
+  - advance: 200ms
+  - shot: menu-again

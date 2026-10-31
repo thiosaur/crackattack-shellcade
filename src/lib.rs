@@ -110,6 +110,11 @@ struct CrackAttack {
     ended: bool,
 }
 
+/// Back to the menu: Q, in either case.
+fn is_back(input: Input) -> bool {
+    matches!(input, Input::Char('q' | 'Q'))
+}
+
 /// The same player, across reconnections: by account, a guest by connection.
 fn same_player(a: &Player, b: &Player) -> bool {
     if a.account_id.is_empty() || b.account_id.is_empty() {
@@ -161,6 +166,11 @@ impl CrackAttack {
             Choice::Computer(level) => Stage::Duel(Duel::against_computer(seed, self.players[0].display_name(), level)),
         };
         self.clock = Clock { origin: r.now_unix_nanos(), ticks: 0 };
+    }
+
+    /// A solo game whose GAME OVER is fully shown.
+    fn game_over_shown(&self) -> bool {
+        matches!(&self.stage, Stage::Solo(solo) if solo.game_over_shown())
     }
 
     /// Ends the room with its result.
@@ -290,12 +300,19 @@ impl Handler for CrackAttack {
     fn on_input(&mut self, r: &mut Room, p: Player, input: Input) {
         let Some(seat) = self.seat_of(&p) else { return };
         self.catch_up(r.now_unix_nanos());
+        let back = seat == 0 && self.solo_room && is_back(input) && !self.game_over_shown();
         match &mut self.stage {
             // The choices are for the room for one; in a room for two, the menu only waits.
             Stage::Menu(menu) if seat == 0 && self.solo_room => {
                 if let Some(choice) = menu.input(input) {
                     self.start(r, choice);
                 }
+            }
+            // In the room for one, Q goes back to the menu (Esc belongs to the arcade: it
+            // leaves). Once GAME OVER is shown, any key ends the game with its score.
+            Stage::Solo(_) | Stage::Duel(_) if back => {
+                self.stage = Stage::Menu(Menu::new());
+                self.shown = [Vec::new(), Vec::new()];
             }
             Stage::Solo(solo) if seat == 0 => {
                 if solo.game_over_shown() {

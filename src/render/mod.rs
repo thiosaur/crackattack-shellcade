@@ -140,6 +140,8 @@ pub(crate) struct DuelView<'a> {
     pub other: DuelSide<'a>,
     pub round: i32,
     pub banner: Option<Banner>,
+    /// Against the computer: Q goes back to the menu.
+    pub menu_key: bool,
 }
 
 /// Duel: the player's board, the center panel, the opponent's board.
@@ -182,7 +184,8 @@ pub(crate) fn compose_duel(canvas: &mut Frame, view: &DuelView) {
         None => {}
     }
     center(canvas, 22, "Arrows move  Space swap", Pen::ink(HINT_COLOR));
-    center(canvas, 23, "Enter raise  Esc leave", Pen::ink(HINT_COLOR));
+    let last_keys = if view.menu_key { "Enter raise  Q menu" } else { "Enter raise  Esc leave" };
+    center(canvas, 23, last_keys, Pen::ink(HINT_COLOR));
 }
 
 fn truncate(text: &str, width: usize) -> String {
