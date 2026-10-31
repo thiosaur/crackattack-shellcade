@@ -1,65 +1,67 @@
-# Crack Attack! pour shellcade
+# Crack Attack! for shellcade
 
-Ce dépôt est le jeu **Crack Attack!** adapté à [shellcade](https://github.com/shellcade/kit),
-l'arcade en terminal à laquelle on joue par SSH. C'est un jeu de blocs à
-aligner : on échange deux blocs voisins pour en faire des lignes de trois ou
-plus, qui disparaissent, pendant que la pile monte. Les réactions en chaîne
-rapportent, et en duel elles envoient des déchets à l'adversaire.
+This repository is the game **Crack Attack!** for [shellcade](https://github.com/shellcade/kit),
+the terminal arcade you play over SSH. It is a block-matching game: you swap
+two neighbouring blocks to line up three or more, which then disappear, while
+the stack keeps rising. Chain reactions score big, and in a duel they send
+garbage to your opponent.
 
-On y joue seul, contre l'ordinateur, ou à deux. Le jeu est compilé en un module
-wasm (`wasm32-wasip1`) que l'arcade fait tourner et qui dessine sur sa grille
-de 80×24 cellules.
+You can play alone, against the computer, or against another player. The game
+is compiled to a wasm module (`wasm32-wasip1`) that the arcade runs; it draws
+on the arcade's 80×24 cell grid.
 
-Le dépôt est autonome : il contient le moteur du jeu, repris de la réécriture
-en Rust de Crack Attack!, et la couche shellcade autour.
+The repository is self-contained: it holds the game engine, taken from the Rust
+rewrite of Crack Attack!, and the shellcade layer around it.
 
-| Dossier | Contenu |
+| Folder | Contents |
 |---|---|
-| `crackattack-core/` | Le moteur du jeu : règles, physique des blocs, mode duel, IA. |
-| `src/` | Le jeu shellcade : la salle et l'horloge (`lib.rs`), le menu (`menu.rs`), la partie solo (`solo.rs`), le duel (`duel.rs`), les touches d'un joueur (`seat.rs`), l'affichage (`render/`, `danger.rs`). |
-| `smoke.yaml`, `smoke-solo.yaml` | Des parties scriptées dont les écrans servent d'aperçu et de contrôle. |
+| `crackattack-core/` | The game engine: rules, block physics, duel mode, AI. |
+| `src/` | The shellcade game: the room and its clock (`lib.rs`), the menu (`menu.rs`), the solo game (`solo.rs`), the duel (`duel.rs`), a player's keys (`seat.rs`), the display (`render/`, `danger.rs`). |
+| `smoke.yaml`, `smoke-solo.yaml` | Scripted games whose screens serve as previews and checks. |
 
-## Les parties
+## Playing
 
-L'arcade propose « Solo » (une place) ou « Duel » (deux places).
+The arcade offers "Solo" (one seat) or "Duel" (two seats).
 
-- **Salle Solo :** un menu propose une partie seule ou un duel contre
-  l'ordinateur, à trois niveaux : Logic (facile), Sigma (moyen), Cortex
-  (difficile). Q ramène au menu depuis une partie.
-- **Salle Duel :** on attend un adversaire, et le duel commence quand il
-  arrive. Une personne de plus dans la salle regarde la partie.
+- **Solo room:** a menu offers a game on your own or a duel against the
+  computer, at three levels: Logic (easy), Sigma (medium), Cortex (hard).
+  Q goes back to the menu from a game.
+- **Duel room:** you wait for an opponent, and the duel starts when they
+  arrive. Anyone else in the room watches.
 
-Un duel se joue en manches. Chacun voit son plateau à gauche et celui de
-l'autre à droite. Entre deux manches, la suivante part quand les deux joueurs
-ont appuyé sur Entrée. Si un joueur s'en va, le duel attend son retour, ou
-l'autre y met fin d'une touche.
+A duel is played in rounds. Each player sees their own board on the left and
+the opponent's on the right. Between rounds, the next one starts once both
+players have pressed Enter. If a player leaves, the duel waits for them to come
+back, or the other player ends it with a key.
 
-Au classement compte le meilleur score d'une manche, ou celui de la partie en
-solo. Un duel contre l'ordinateur ne compte pas.
+The leaderboard keeps the best score of a round, or of the game in solo. A duel
+against the computer does not count.
 
-## Commandes
+## Controls
 
-Flèches ou WASD : déplacer le curseur · Espace : échanger · Entrée : faire
-monter la pile · P : pause (en solo) · Q : retour au menu (salle Solo) ·
-Échap : quitter.
+Arrows or WASD: move the cursor · Space: swap · Enter: raise the stack ·
+P: pause (solo) · Q: back to the menu (Solo room) · Esc: leave.
 
-## Essayer en local
+## Trying it locally
 
 ```sh
-# Une fois : le CLI shellcade-kit (v2.17.1), dans tools/ (ignoré par git).
+# Once: the shellcade-kit CLI (v2.17.1), in tools/ (ignored by git).
 mkdir -p tools && curl -fsSL -o tools/kit.tar.gz \
   https://github.com/shellcade/kit/releases/download/v2.17.1/shellcade-kit_2.17.1_darwin_arm64.tar.gz \
   && tar -xzf tools/kit.tar.gz -C tools shellcade-kit && rm tools/kit.tar.gz
 
-tools/shellcade-kit play . --seats 1   # la salle Solo et son menu
-tools/shellcade-kit play .             # une salle Duel ; Ctrl-T passe d'un joueur à l'autre
-cargo test                             # les tests, en natif
-tools/shellcade-kit check .            # le banc de conformité (latence, mémoire, déterminisme)
-tools/shellcade-kit smoke .            # les écrans de smoke.yaml, dans smoke-out/
+tools/shellcade-kit play . --seats 1   # the Solo room and its menu
+tools/shellcade-kit play .             # a Duel room; Ctrl-T switches between the players
+cargo test                             # the tests, natively
+tools/shellcade-kit check .            # the conformance bench (latency, memory, determinism)
+tools/shellcade-kit smoke .            # the screens of smoke.yaml, in smoke-out/
 tools/shellcade-kit smoke . -script smoke-solo.yaml
 ```
 
-## Licence
+The download above is the macOS arm64 build; other platforms are on the
+[kit's releases page](https://github.com/shellcade/kit/releases/tag/v2.17.1).
 
-GPL-3.0-or-later, comme le jeu d'origine (Crack Attack! 1.1.14, de Daniel
-Nelson, GPL v2 ou ultérieure). Voir `LICENSE`.
+## License
+
+GPL-3.0-or-later, like the original game (Crack Attack! 1.1.14, by Daniel
+Nelson, GPL v2 or later). See `LICENSE`.
