@@ -30,6 +30,13 @@ pub(crate) const CHAIN_COLOR: u8 = 220;
 pub(crate) const LOGO_COLORS: [u8; 2] = [124, 127];
 /// Key reminder at the bottom of the side panel.
 pub(crate) const HINT_COLOR: u8 = 244;
+/// Duel: the round won, and lost.
+pub(crate) const WIN_COLOR: u8 = 220;
+pub(crate) const LOSS_COLOR: u8 = 160;
+
+/// Saturation of a board drawn muted (the opponent's, a lost one): 1 is unchanged, 0 is
+/// grays. Pure grays would merge blue and green blocks (lumas 109 and 103).
+pub(crate) const MUTED: f32 = 0.3;
 
 /// The RGB color of an xterm 256-color index (16 to 255: the 6×6×6 cube, then the
 /// grays). The 16 system colors depend on the terminal theme; none is used here.
@@ -45,6 +52,18 @@ pub(crate) fn rgb(index: u8) -> Color {
     }
 }
 
+/// `color` with its saturation scaled to `saturation` (1 = unchanged, 0 = its gray),
+/// keeping its luma.
+pub(crate) fn tint(color: Color, saturation: f32) -> Color {
+    if !color.is_set() || saturation >= 1.0 {
+        return color;
+    }
+    let (r, g, b) = color.rgb_vals();
+    let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+    let mix = |c: u8| (luma + saturation * (c as f32 - luma)).round().clamp(0.0, 255.0) as u8;
+    Color::rgb(mix(r), mix(g), mix(b))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -56,5 +75,13 @@ mod tests {
         assert_eq!(rgb(124).rgb_vals(), (175, 0, 0));
         assert_eq!(rgb(208).rgb_vals(), (255, 135, 0));
         assert_eq!(rgb(240).rgb_vals(), (88, 88, 88));
+    }
+
+    #[test]
+    fn a_muted_color_keeps_its_luma() {
+        let (r, g, b) = tint(rgb(34), 0.0).rgb_vals();
+        assert!(r == g && g == b && (102..=104).contains(&r));
+        assert_eq!(tint(rgb(34), 1.0), rgb(34));
+        assert!(!tint(Color::unset(), 0.0).is_set());
     }
 }

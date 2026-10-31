@@ -59,6 +59,7 @@ pub(super) fn bottom_unit(grid_y: i32, sub_grid_y: i32, play_offset_y: f32) -> i
 pub(super) fn paint(frame: &FrameData) -> Canvas {
     let mut canvas = Canvas::new();
     let rise = frame.play_offset_y;
+    canvas.dots = dot_lines(rise);
 
     // Garbage first: the blocks a shattered garbage turns into are painted over it.
     for garbage in &frame.garbage {
@@ -171,33 +172,41 @@ fn awaking_look(remaining: i32, pop_countdown: i32, pop_color: i32, color: u8) -
     (shown, height)
 }
 
-/// Dot glyph for the center of a cell of the playable area, if it falls on this line.
-/// The playable area is the rows the cursor can reach (1 to `SAFE_HEIGHT - 1`); the row
-/// above stays clear: the stack rises into it and garbage arrives through it.
-fn dot_at(col: usize, line: i32, rise: f32) -> Option<char> {
+/// The dots of the playable area for this rise: one per row, on the line and with the
+/// glyph that land closest to the center of its cells. The playable area is the rows the
+/// cursor can reach (1 to `SAFE_HEIGHT - 1`); the row above stays clear: the stack rises
+/// into it and garbage arrives through it.
+fn dot_lines(rise: f32) -> Vec<(i32, char)> {
+    (1..SAFE_HEIGHT as i32)
+        .filter_map(|row| {
+            let center = bottom_unit(row, 0, rise) as f32 + (ROW_UNITS - 1) as f32 / 2.0;
+            // The closest (line, glyph): in the line holding the center or the one below.
+            let home = (center as i32).div_euclid(LINE_UNITS);
+            let (line, glyph) = [home, home - 1]
+                .into_iter()
+                .flat_map(|l| (0..DOTS.len()).map(move |g| (l, g)))
+                .min_by(|a, b| {
+                    let off = |(l, g): (i32, usize)| ((l * LINE_UNITS) as f32 + DOT_HEIGHTS[g] - center).abs();
+                    off(*a).total_cmp(&off(*b))
+                })?;
+            (0..TOP_UNIT / LINE_UNITS).contains(&line).then_some((line, DOTS[glyph]))
+        })
+        .collect()
+}
+
+/// Dot glyph for column `col` of `line`, if a cell center of the playable area falls
+/// there (`dots` from `dot_lines`).
+fn dot_at(dots: &[(i32, char)], col: usize, line: i32) -> Option<char> {
     if col % CELL_COLUMNS != CELL_COLUMNS / 2 || col >= PLAY_WIDTH * CELL_COLUMNS {
         return None;
     }
-    (1..SAFE_HEIGHT as i32).find_map(|row| {
-        let center = bottom_unit(row, 0, rise) as f32 + (ROW_UNITS - 1) as f32 / 2.0;
-        // The closest (line, glyph): in the line holding the center or the one below.
-        let home = (center as i32).div_euclid(LINE_UNITS);
-        let (best_line, glyph) = [home, home - 1]
-            .into_iter()
-            .flat_map(|l| (0..DOTS.len()).map(move |g| (l, g)))
-            .min_by(|a, b| {
-                let off = |(l, g): (i32, usize)| ((l * LINE_UNITS) as f32 + DOT_HEIGHTS[g] - center).abs();
-                off(*a).total_cmp(&off(*b))
-            })?;
-        let in_view = (0..TOP_UNIT / LINE_UNITS).contains(&best_line);
-        (in_view && best_line == line).then_some(DOTS[glyph])
-    })
+    dots.iter().find(|d| d.0 == line).map(|d| d.1)
 }
 
 /// The board's cells for screen line `line` (0 = just above the ground), from the
 /// painted canvas: blocks, cursor, dying squares and the dots of empty cells. The line
 /// just above the ground is underlined: the ground takes no line of its own.
-pub(super) fn write_line(out: &mut Writer, canvas: &Canvas, line: i32, rise: f32) {
+pub(super) fn write_line(out: &mut Writer, canvas: &Canvas, line: i32) {
     let base = line * LINE_UNITS;
     let ground = line == 0;
     for col in 0..FIELD_COLUMNS {
@@ -206,7 +215,7 @@ pub(super) fn write_line(out: &mut Writer, canvas: &Canvas, line: i32, rise: f32
         } else {
             let units: [Option<u8>; 8] = std::array::from_fn(|u| canvas.get(col, base + u as i32));
             let dot = (units.iter().all(Option::is_none) && !canvas.no_dots.contains(&(col, line)))
-                .then(|| dot_at(col, line, rise))
+                .then(|| dot_at(&canvas.dots, col, line))
                 .flatten();
             match dot {
                 Some(dot) => (dot, Pen::ink(DOT_COLOR)),
@@ -258,9 +267,10 @@ mod tests {
 
     #[test]
     fn dots_mark_each_cell_of_the_playable_area() {
+        let dots = dot_lines(0.0);
         let count = (0..TOP_UNIT / LINE_UNITS)
             .flat_map(|line| (0..FIELD_COLUMNS).map(move |col| (col, line)))
-            .filter(|&(col, line)| dot_at(col, line, 0.0).is_some())
+            .filter(|&(col, line)| dot_at(&dots, col, line).is_some())
             .count();
         assert_eq!(count, PLAY_WIDTH * (SAFE_HEIGHT - 1));
     }

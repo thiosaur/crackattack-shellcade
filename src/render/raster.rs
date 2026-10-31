@@ -4,7 +4,7 @@
 use shellcade_kit::prelude::{Cell, Frame, ATTR_BOLD, ATTR_REVERSE, ATTR_UNDERLINE};
 
 use super::board::{FIELD_COLUMNS, LOWEST_UNIT, TOP_UNIT};
-use super::palette::{rgb, CURSOR_COLOR};
+use super::palette::{rgb, tint, CURSOR_COLOR};
 
 /// Eighth blocks, from 1/8 to 7/8 of the height, drawn from the bottom.
 pub(super) const LOWER_EIGHTHS: [char; 7] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇'];
@@ -21,6 +21,8 @@ pub(super) struct Canvas {
     /// Dot places (column, line) to leave blank: the cells of a swap, which a sliding
     /// block crosses.
     pub(super) no_dots: Vec<(usize, i32)>,
+    /// The dots of the playable area: (line, glyph), one per row.
+    pub(super) dots: Vec<(i32, char)>,
 }
 
 impl Canvas {
@@ -29,6 +31,7 @@ impl Canvas {
             cells: vec![None; FIELD_COLUMNS * (TOP_UNIT - LOWEST_UNIT) as usize],
             marks: Vec::new(),
             no_dots: Vec::new(),
+            dots: Vec::new(),
         }
     }
 
@@ -57,9 +60,10 @@ impl Canvas {
 /// One cell for 8 stacked units (`units[0]` at the bottom): the split (lower color,
 /// upper color, height of the lower part in eighths) that matches the most units.
 pub(super) fn split_line(units: &[Option<u8>; 8]) -> (Option<u8>, Option<u8>, usize) {
-    // Most cells are one color, or empty.
-    if units.iter().all(|u| *u == units[0]) {
-        return (units[0], units[0], 8);
+    // Most cells are one color, or two (a block under its gap): the split is exact.
+    let k = units.iter().position(|u| *u != units[0]).unwrap_or(8);
+    if units[k..].iter().all(|u| *u == units[k.min(7)]) {
+        return if k == 8 { (units[0], units[0], 8) } else { (units[0], units[k], k) };
     }
     // The cursor counts more than anything else.
     let weight = |u: &Option<u8>| if *u == Some(CURSOR_COLOR) { CURSOR_WEIGHT } else { 1 };
@@ -106,12 +110,12 @@ impl Pen {
         Self { fg, bold: true, ..Self::default() }
     }
 
-    fn cell(self, rune: char) -> Cell {
+    fn cell(self, rune: char, saturation: f32) -> Cell {
         let attr = [(self.bold, ATTR_BOLD), (self.reverse, ATTR_REVERSE), (self.underline, ATTR_UNDERLINE)]
             .iter()
             .filter(|(on, _)| *on)
             .fold(0, |attr, (_, bit)| attr | bit);
-        let color = |c: Option<u8>| c.map_or(Default::default(), rgb);
+        let color = |c: Option<u8>| c.map_or(Default::default(), |c| tint(rgb(c), saturation));
         Cell { rune, fg: color(self.fg), bg: color(self.bg), attr, ..Cell::default() }
     }
 }
@@ -121,15 +125,17 @@ pub(super) struct Writer<'a> {
     frame: &'a mut Frame,
     row: i32,
     pub(super) col: i32,
+    /// Colors' saturation: 1 as they are, less for a muted board (see `MUTED`).
+    pub(super) saturation: f32,
 }
 
 impl<'a> Writer<'a> {
     pub(super) fn new(frame: &'a mut Frame, row: i32, col: i32) -> Self {
-        Self { frame, row, col }
+        Self { frame, row, col, saturation: 1.0 }
     }
 
     pub(super) fn put(&mut self, rune: char, pen: Pen) {
-        self.frame.set(self.row, self.col, pen.cell(rune));
+        self.frame.set(self.row, self.col, pen.cell(rune, self.saturation));
         self.col += 1;
     }
 

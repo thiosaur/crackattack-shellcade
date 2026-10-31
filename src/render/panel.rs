@@ -52,9 +52,8 @@ pub(super) fn write_panel_line(out: &mut Writer, i: usize, lines: usize, frame: 
         if let Some(n) = hud.chain {
             out.text(&format!("Chain x{}!", n), Pen::bold(Some(CHAIN_COLOR)));
         }
-    } else if (LOGO_LINE..LOGO_LINE + art().colors.len()).contains(&i) {
-        let row = i - LOGO_LINE;
-        out.text(&logo_line(row, hud.game_over), Pen::ink(art().colors[row]));
+    } else if (LOGO_LINE..LOGO_LINE + logo_lines()).contains(&i) {
+        write_logo_line(out, i - LOGO_LINE, hud.game_over);
     } else if hud.game_over.is_some_and(|t| t >= game_over_ticks()) {
         if i == first_key_line {
             out.text("Press any key", Pen::bold(None));
@@ -91,6 +90,22 @@ fn art() -> &'static Art {
             .collect();
         Art { logo: cells(LOGO), game_over: cells(GAME_OVER), colors }
     })
+}
+
+/// Lines of the logo (the two words and the blank line between them).
+pub(super) fn logo_lines() -> usize {
+    art().colors.len()
+}
+
+/// Columns of the logo, at its widest.
+pub(super) fn logo_width() -> usize {
+    art().logo.iter().map(Vec::len).max().unwrap_or(0)
+}
+
+/// Line `row` of the logo, in its word's color; `game_over` ticks after a loss, turning
+/// into GAME OVER.
+pub(super) fn write_logo_line(out: &mut Writer, row: usize, game_over: Option<i32>) {
+    out.text(&logo_line(row, game_over), Pen::ink(art().colors[row]));
 }
 
 /// Ticks from the loss until GAME OVER is fully shown.
@@ -141,7 +156,7 @@ mod tests {
 
     #[test]
     fn the_logo_and_keys_fit_the_panel() {
-        let logo_end = LOGO_LINE + art().colors.len();
+        let logo_end = LOGO_LINE + logo_lines();
         assert!(logo_end <= super::super::SCREEN_LINES - KEY_LINES);
     }
 }

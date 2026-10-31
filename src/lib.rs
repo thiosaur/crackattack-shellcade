@@ -1,8 +1,9 @@
-// Crack Attack! for shellcade: one player, the game of the terminal version on the
+// Crack Attack! for shellcade: solo, or a duel between the two players of a room, on the
 // arcade's 80×24 canvas.
 //
 //   cargo test                           # natively
 //   tools/shellcade-kit play .           # build the wasm artifact and play it
+//   tools/shellcade-kit play . --seats 2 # a duel, Ctrl-T switching player
 //   tools/shellcade-kit check .          # the conformance harness
 //
 // The engine (`crackattack-core`) steps 50 times per second. Its ticks follow the room
@@ -10,20 +11,23 @@
 #![forbid(unsafe_code)]
 
 mod danger;
+mod duel;
 mod render;
+mod seat;
+mod solo;
 
-use crackattack_core::gameplay_event::GameplayEvent;
-use crackattack_core::input::{INPUT_ADVANCE, INPUT_DOWN, INPUT_LEFT, INPUT_RIGHT, INPUT_SWAP, INPUT_UP};
-use crackattack_core::{FrameData, GameState, InputSnapshot, STEPS_PER_SECOND};
+use crackattack_core::STEPS_PER_SECOND;
 use shellcade_kit::prelude::*;
+
+use duel::Duel;
+use render::Tone;
+use solo::Solo;
 
 /// One engine tick, in nanoseconds of room time.
 const TICK_NANOS: i64 = 1_000_000_000 / STEPS_PER_SECOND as i64;
 /// Most ticks caught up in one wake: after a longer stall, the game slows down rather
 /// than jump ahead (and stays inside the callback deadline).
 const MAX_CATCH_UP: i64 = 10;
-/// How long the chain just reached stays in the side panel (ticks).
-const CHAIN_SHOW_TICKS: i32 = 75;
 
 struct CrackAttackGame;
 
@@ -32,10 +36,12 @@ impl Game for CrackAttackGame {
         Meta {
             slug: "crackattack",
             name: "Crack Attack!",
-            short_description: "Swap blocks, line up three, chain the combos before the stack tops out.",
+            short_description: "Swap blocks, line up three, chain the combos: alone or in a duel.",
             min_players: 1,
-            max_players: 1,
-            tags: &["puzzle", "action"],
+            max_players: 2,
+            tags: &["puzzle", "action", "versus"],
+            quick_mode_label: "Duel",
+            solo_mode_label: "Solo",
             leaderboard: Some(Leaderboard {
                 metric_label: "score",
                 direction: Direction::HigherBetter,
@@ -48,200 +54,254 @@ impl Game for CrackAttackGame {
         }
     }
 
-    fn new_room(&self, _cfg: &RoomConfig) -> Box<dyn Handler> {
-        Box::new(CrackAttack::new())
+    fn new_room(&self, cfg: &RoomConfig) -> Box<dyn Handler> {
+        Box::new(CrackAttack::new(cfg.mode == Mode::Solo || cfg.capacity <= 1))
     }
 }
 
-/// One room: one game. All its state lives here (the host may snapshot the room).
-struct CrackAttack {
-    canvas: Frame,
-    /// The screen last sent: most ticks change nothing visible, and are not sent.
-    shown: Vec<Cell>,
-    player: Option<Player>,
-    /// Created when the player joins, from the room's seed.
-    game: Option<GameState>,
-    last: FrameData,
-    /// Room time of tick 0, and ticks run since (game, then game-over animation).
+/// Room time turned into engine ticks.
+struct Clock {
+    /// Room time of tick 0, and ticks run since.
     origin: i64,
     ticks: i64,
-    paused: bool,
-    /// Keys pressed since the last tick (`INPUT_*` bits), and those of the last tick,
-    /// for the engine's edge detection.
-    keys: u8,
-    prev_state: u8,
-    danger: danger::DangerAnimator,
-    /// Chain just reached, and ticks left to show it.
-    chain: Option<(i32, i32)>,
-    hud: render::Hud,
-    ended: bool,
 }
 
-impl CrackAttack {
-    fn new() -> Self {
-        Self {
-            canvas: Frame::new(),
-            shown: Vec::new(),
-            player: None,
-            game: None,
-            last: FrameData::default(),
-            origin: 0,
-            ticks: 0,
-            paused: false,
-            keys: 0,
-            prev_state: 0,
-            danger: danger::DangerAnimator::new(),
-            chain: None,
-            hud: render::Hud::default(),
-            ended: false,
-        }
-    }
-
-    /// Runs the ticks due by room time `now`.
-    fn catch_up(&mut self, now: i64) {
-        if self.paused || self.ended {
-            // Time stands still: the next ticks start from now.
+impl Clock {
+    /// Ticks to run by room time `now`; none while `running` is false (time then stands
+    /// still: the next ticks start from now).
+    fn due(&mut self, now: i64, running: bool) -> i64 {
+        if !running {
             self.origin = now - self.ticks * TICK_NANOS;
-            return;
+            return 0;
         }
         let due = (now - self.origin) / TICK_NANOS - self.ticks;
         if due > MAX_CATCH_UP {
             self.origin += (due - MAX_CATCH_UP) * TICK_NANOS;
         }
-        for _ in 0..due.clamp(0, MAX_CATCH_UP) {
-            self.tick();
+        let due = due.clamp(0, MAX_CATCH_UP);
+        self.ticks += due;
+        due
+    }
+}
+
+/// What the room is doing.
+enum Stage {
+    /// Nobody joined yet.
+    Empty,
+    /// One player, waiting for an opponent (or starting a solo game).
+    Waiting,
+    Solo(Solo),
+    Duel(Duel),
+}
+
+/// One room. All its state lives here (the host may snapshot the room).
+struct CrackAttack {
+    /// A solo room: no opponent will come.
+    solo_room: bool,
+    stage: Stage,
+    /// Players in seat order: the first two play, a later one watches.
+    players: Vec<Player>,
+    clock: Clock,
+    canvas: Frame,
+    /// The screen last sent to each seat (the solo screen goes to everyone, as seat 0's):
+    /// most ticks change nothing visible, and are not sent.
+    shown: [Vec<Cell>; 2],
+    ended: bool,
+}
+
+/// The same player, across reconnections: by account, a guest by connection.
+fn same_player(a: &Player, b: &Player) -> bool {
+    if a.account_id.is_empty() || b.account_id.is_empty() {
+        a.conn == b.conn
+    } else {
+        a.account_id == b.account_id
+    }
+}
+
+impl CrackAttack {
+    fn new(solo_room: bool) -> Self {
+        Self {
+            solo_room,
+            stage: Stage::Empty,
+            players: Vec::new(),
+            clock: Clock { origin: 0, ticks: 0 },
+            canvas: Frame::new(),
+            shown: [Vec::new(), Vec::new()],
+            ended: false,
         }
     }
 
-    /// One tick: the game, or once it is lost, the GAME OVER animation.
-    fn tick(&mut self) {
-        self.ticks += 1;
-        if self.last.game_over {
-            if !self.game_over_shown() {
-                self.hud.game_over = Some(self.hud.game_over.map_or(0, |t| t + 1));
+    fn seat_of(&self, p: &Player) -> Option<usize> {
+        self.players.iter().position(|q| same_player(p, q))
+    }
+
+    /// Runs the ticks due by room time `now`.
+    fn catch_up(&mut self, now: i64) {
+        let running = !self.ended
+            && match &self.stage {
+                Stage::Solo(solo) => !solo.paused(),
+                Stage::Duel(duel) => !duel.suspended(),
+                Stage::Empty | Stage::Waiting => false,
+            };
+        for _ in 0..self.clock.due(now, running) {
+            match &mut self.stage {
+                Stage::Solo(solo) => solo.tick(),
+                Stage::Duel(duel) => duel.tick(),
+                Stage::Empty | Stage::Waiting => {}
             }
-            return;
         }
-        let Some(game) = &mut self.game else { return };
-        let mut input = InputSnapshot::new();
-        input.state = std::mem::take(&mut self.keys);
-        input.pressed_this_frame = input.state & !self.prev_state;
-        input.prev_state = self.prev_state;
-        self.prev_state = input.state;
-
-        self.last = game.step(&input);
-        self.danger.step(&self.last.ui);
-        self.chain = self.chain.map(|(n, left)| (n, left - 1)).filter(|&(_, left)| left > 0);
-        for event in &self.last.gameplay_events {
-            if let GameplayEvent::ChainProgressed(e) = event {
-                self.chain = Some((e.chain_level, CHAIN_SHOW_TICKS));
-            }
-        }
-        self.hud = render::Hud { danger: self.danger.bars(), chain: self.chain.map(|(n, _)| n), game_over: None };
     }
 
-    fn game_over_shown(&self) -> bool {
-        self.hud.game_over.is_some_and(|t| t >= render::game_over_ticks())
+    fn start_solo(&mut self, r: &mut Room) {
+        self.stage = Stage::Solo(Solo::new(r.rng_u64() as u32));
+        self.clock = Clock { origin: r.now_unix_nanos(), ticks: 0 };
     }
 
-    /// Ends the room with the score.
+    /// Ends the room with its result.
     fn finish(&mut self, r: &mut Room) {
         if self.ended {
             return;
         }
         self.ended = true;
-        let rankings = self.player.iter().map(|player| PlayerResult {
-            player: player.clone(),
-            metric: self.last.score as i64,
-            rank: 1,
-            status: Status::Finished,
-        });
-        r.end(&Outcome { rankings: rankings.collect() });
+        let rankings = match &self.stage {
+            Stage::Solo(solo) => self.players.first().map(|player| PlayerResult {
+                player: player.clone(),
+                metric: solo.last.score as i64,
+                rank: 1,
+                status: Status::Finished,
+            }).into_iter().collect(),
+            Stage::Duel(duel) => duel.rankings(&self.players),
+            Stage::Empty | Stage::Waiting => Vec::new(),
+        };
+        r.end(&Outcome { rankings });
     }
 
+    /// Sends each seat its screen, if it changed.
     fn render(&mut self, r: &mut Room) {
-        if self.game.is_none() {
-            return;
+        match &self.stage {
+            Stage::Empty => {}
+            Stage::Waiting => {
+                let lines = [
+                    ("Waiting for an opponent...".to_string(), Tone::Strong),
+                    (String::new(), Tone::Plain),
+                    ("S: play solo meanwhile".to_string(), Tone::Hint),
+                    ("Esc: leave".to_string(), Tone::Hint),
+                ];
+                render::compose_logo_screen(&mut self.canvas, &lines);
+                if changed(&mut self.shown[0], &self.canvas) {
+                    r.identical(&self.canvas);
+                }
+            }
+            Stage::Solo(solo) => {
+                solo.compose(&mut self.canvas);
+                if changed(&mut self.shown[0], &self.canvas) {
+                    r.identical(&self.canvas);
+                }
+            }
+            Stage::Duel(duel) => {
+                for side in 0..self.players.len().min(2) {
+                    duel.compose(side, &mut self.canvas);
+                    if changed(&mut self.shown[side], &self.canvas) {
+                        r.send(&self.players[side], &self.canvas);
+                    }
+                }
+            }
         }
-        render::compose(&mut self.canvas, &self.last, self.paused, &self.hud);
-        let cells: Vec<Cell> = (0..ROWS).flat_map(|row| (0..COLS).map(move |col| (row, col)))
-            .map(|(row, col)| self.canvas.get(row, col))
-            .collect();
-        let same = |a: &Cell, b: &Cell| {
-            (a.rune, a.cp2, a.cp3, a.fg, a.bg, a.attr, a.cont) == (b.rune, b.cp2, b.cp3, b.fg, b.bg, b.attr, b.cont)
-        };
-        if cells.len() == self.shown.len() && cells.iter().zip(&self.shown).all(|(a, b)| same(a, b)) {
-            return;
-        }
-        r.identical(&self.canvas);
-        self.shown = cells;
     }
 }
 
-/// The engine key for an input, `INPUT_*` bits (0 for none). Letters work in either case.
-fn map_input(input: Input) -> u8 {
-    match input {
-        Input::Key(Key::Up) => INPUT_UP,
-        Input::Key(Key::Down) => INPUT_DOWN,
-        Input::Key(Key::Left) => INPUT_LEFT,
-        Input::Key(Key::Right) => INPUT_RIGHT,
-        Input::Key(Key::Enter) => INPUT_ADVANCE,
-        Input::Char(c) => match c.to_ascii_lowercase() {
-            'w' => INPUT_UP,
-            's' => INPUT_DOWN,
-            'a' => INPUT_LEFT,
-            'd' => INPUT_RIGHT,
-            ' ' => INPUT_SWAP,
-            _ => 0,
-        },
-        _ => 0,
+/// Whether `canvas` differs from the screen `shown`, which then becomes it.
+fn changed(shown: &mut Vec<Cell>, canvas: &Frame) -> bool {
+    let cells: Vec<Cell> = (0..ROWS).flat_map(|row| (0..COLS).map(move |col| canvas.get(row, col))).collect();
+    let same = |a: &Cell, b: &Cell| {
+        (a.rune, a.cp2, a.cp3, a.fg, a.bg, a.attr, a.cont) == (b.rune, b.cp2, b.cp3, b.fg, b.bg, b.attr, b.cont)
+    };
+    if cells.len() == shown.len() && cells.iter().zip(shown.iter()).all(|(a, b)| same(a, b)) {
+        return false;
     }
+    *shown = cells;
+    true
 }
 
 impl Handler for CrackAttack {
     fn on_start(&mut self, _r: &mut Room) {}
 
     fn on_join(&mut self, r: &mut Room, p: Player) {
-        if self.game.is_none() {
-            self.game = Some(GameState::new(r.rng_u64() as u32));
-            self.origin = r.now_unix_nanos();
-            self.player = Some(p);
-            // The first frame, before the first tick.
-            self.tick();
+        self.catch_up(r.now_unix_nanos());
+        if let Some(seat) = self.seat_of(&p) {
+            // Back (a new connection, or a revived room).
+            self.players[seat] = p;
+            if let Stage::Duel(duel) = &mut self.stage {
+                duel.rejoin(seat);
+            }
+        } else {
+            self.players.push(p);
+            match self.stage {
+                Stage::Empty if self.solo_room => self.start_solo(r),
+                Stage::Empty => self.stage = Stage::Waiting,
+                Stage::Waiting => {
+                    let names = [0, 1].map(|seat| self.players[seat].display_name());
+                    self.stage = Stage::Duel(Duel::new(r.rng_u64() as u32, names));
+                    self.clock = Clock { origin: r.now_unix_nanos(), ticks: 0 };
+                }
+                // A solo game going on: the newcomer watches.
+                Stage::Solo(_) | Stage::Duel(_) => {}
+            }
         }
-        // A new connection (or a revived room) gets the whole screen.
-        self.shown.clear();
+        // Everyone gets the whole screen again.
+        self.shown = [Vec::new(), Vec::new()];
         self.render(r);
     }
 
-    fn on_leave(&mut self, r: &mut Room, _p: Player) {
-        self.finish(r);
+    fn on_leave(&mut self, r: &mut Room, p: Player) {
+        let Some(seat) = self.seat_of(&p) else { return };
+        self.catch_up(r.now_unix_nanos());
+        match &mut self.stage {
+            Stage::Duel(duel) if seat < 2 => {
+                if duel.suspended() {
+                    // Nobody left to play.
+                    self.finish(r);
+                } else {
+                    // The duel stands still: the one who stays sees the tally, and may
+                    // end it with a key.
+                    duel.leave(seat);
+                }
+            }
+            _ if seat == 0 => self.finish(r),
+            // A spectator.
+            _ => {}
+        }
+        self.render(r);
     }
 
-    fn on_input(&mut self, r: &mut Room, _p: Player, input: Input) {
+    fn on_input(&mut self, r: &mut Room, p: Player, input: Input) {
+        let Some(seat) = self.seat_of(&p) else { return };
         self.catch_up(r.now_unix_nanos());
-        if self.last.game_over {
-            // Keys pressed during the animation do not count.
-            if self.game_over_shown() {
-                self.finish(r);
+        match &mut self.stage {
+            Stage::Waiting if seat == 0 && matches!(input, Input::Char('s' | 'S')) => self.start_solo(r),
+            Stage::Solo(solo) if seat == 0 => {
+                if solo.game_over_shown() {
+                    self.finish(r);
+                } else {
+                    solo.input(input);
+                }
             }
-            return;
-        }
-        if matches!(input, Input::Char('p' | 'P')) {
-            self.paused = !self.paused;
-            // The keys pressed during the pause must not count as held after it.
-            self.keys = 0;
-            self.prev_state = 0;
-        } else if !self.paused {
-            self.keys |= map_input(input);
+            Stage::Duel(duel) if seat < 2 => {
+                if duel.suspended() {
+                    self.finish(r);
+                } else {
+                    duel.input(seat, input);
+                }
+            }
+            _ => {}
         }
         self.render(r);
     }
 
     fn on_wake(&mut self, r: &mut Room) {
-        let ticks = self.ticks;
+        let ticks = self.clock.ticks;
         self.catch_up(r.now_unix_nanos());
-        if self.ticks != ticks {
+        if self.clock.ticks != ticks {
             self.render(r);
         }
     }
@@ -255,38 +315,30 @@ mod tests {
 
     #[test]
     fn ticks_follow_room_time_not_wakes() {
-        let mut room = CrackAttack::new();
-        room.game = Some(GameState::new(7));
-        room.catch_up(5 * TICK_NANOS);
-        assert_eq!(room.ticks, 5);
+        let mut clock = Clock { origin: 0, ticks: 0 };
+        assert_eq!(clock.due(5 * TICK_NANOS, true), 5);
         // The same instant again: nothing more.
-        room.catch_up(5 * TICK_NANOS);
-        assert_eq!(room.ticks, 5);
+        assert_eq!(clock.due(5 * TICK_NANOS, true), 0);
         // A long stall: a bounded catch-up, then the clock goes on from there.
-        room.catch_up(1000 * TICK_NANOS);
-        assert_eq!(room.ticks, 5 + MAX_CATCH_UP);
-        room.catch_up(1001 * TICK_NANOS);
-        assert_eq!(room.ticks, 6 + MAX_CATCH_UP);
+        assert_eq!(clock.due(1000 * TICK_NANOS, true), MAX_CATCH_UP);
+        assert_eq!(clock.due(1001 * TICK_NANOS, true), 1);
     }
 
     #[test]
-    fn the_pause_stops_the_clock() {
-        let mut room = CrackAttack::new();
-        room.game = Some(GameState::new(7));
-        room.catch_up(3 * TICK_NANOS);
-        room.paused = true;
-        room.catch_up(500 * TICK_NANOS);
-        room.paused = false;
-        room.catch_up(501 * TICK_NANOS);
-        assert_eq!(room.ticks, 4);
+    fn a_stopped_clock_resumes_where_it_was() {
+        let mut clock = Clock { origin: 0, ticks: 0 };
+        clock.due(3 * TICK_NANOS, true);
+        assert_eq!(clock.due(500 * TICK_NANOS, false), 0);
+        assert_eq!(clock.due(501 * TICK_NANOS, true), 1);
+        assert_eq!(clock.ticks, 4);
     }
 
     #[test]
-    fn keys_map_to_the_engine_inputs() {
-        assert_eq!(map_input(Input::Char(' ')), INPUT_SWAP);
-        assert_eq!(map_input(Input::Char('W')), INPUT_UP);
-        assert_eq!(map_input(Input::Key(Key::Enter)), INPUT_ADVANCE);
-        assert_eq!(map_input(Input::Char('x')), 0);
+    fn players_are_recognized_by_account_or_connection() {
+        let player = |account: &str, conn: &str| Player { account_id: account.into(), conn: conn.into(), ..Player::default() };
+        assert!(same_player(&player("a", "1"), &player("a", "2")));
+        assert!(!same_player(&player("a", "1"), &player("b", "1")));
+        assert!(same_player(&player("", "1"), &player("", "1")));
+        assert!(!same_player(&player("", "1"), &player("", "2")));
     }
 }
-

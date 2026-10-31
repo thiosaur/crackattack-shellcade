@@ -1,17 +1,25 @@
 # Scripted screens: `tools/shellcade-kit smoke .` (the catalog CI runs it on each PR).
+# A duel; the solo game is in smoke-solo.yaml.
 seed: 42
-seats: 1
+seats: 2
 heartbeat: 20ms
 steps:
   - advance: 1s
-  - shot: opening
+  - shot: countdown
+  - advance: 4s
+  - seat: 0
   - key: right
   - key: space
-  - advance: 400ms
-  - shot: swapped
-  - key: enter
-  - advance: 10s
-  - shot: risen
-  - rune: "p"
   - advance: 1s
-  - shot: paused
+  - shot: playing
+  - advance: 120s
+  - shot: round-over
+  - advance: 6s
+  - shot: between-rounds
+  - key: enter
+  - advance: 200ms
+  - shot: one-ready
+  - seat: 1
+  - key: enter
+  - advance: 1s
+  - shot: round-2
