@@ -335,14 +335,14 @@ fn print_golden_decisions() {
 const GOLDEN_HASHES: [[u64; 2]; 10] = [
     [0x5d332a034a481edc, 0x4bfba5f8521af9a8],
     [0x8c13a1a7f2113fed, 0x9db0f846cb9c74ed],
-    [0x5e9e2cae3fe51471, 0x7c381d59a606fe01],
+    [0x11a0887fd414d225, 0xd9265f476f7118e5],
     [0x3357c25cb56dfda3, 0x15131f475f8b885e],
     [0x4185aab17f66ef1a, 0xb8d2c3470cc5e445],
     [0xd9f1824e3ca7c9fc, 0x97698d862fd61d6d],
     [0xd27e73eca483b778, 0x9438fd832123faaa],
     [0x36ff74360848b6bb, 0x8e26435b5082ebac],
     [0x1b15e6307d3541ba, 0x5a3cf1e0e97ddd84],
-    [0xc05c59b20c5979c6, 0xd2a764215771137e],
+    [0x6e1cdc4d9198496e, 0xd2a764215771137e],
 ];
 
 /// Characterisation: the bot's inputs on fixed games. A refactor must not move them; a change of

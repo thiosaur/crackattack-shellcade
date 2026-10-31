@@ -161,7 +161,9 @@ impl AiTuning {
             undermine: true,
             chain_setup: true,
             chain_lookahead: true,
-            lookahead_budget: 0,
+            // The deeper searches spread over ticks: the worst tick of Hard 7.3 -> 0.8 ms, of
+            // Medium 1.7 -> 0.4 ms, for the same strength in duel and solo (journal S46, S47).
+            lookahead_budget: 5000,
             big_combo_setup_max_cost: 18,
             fire_min_chain: 2,
             fire_min_run: 4,
@@ -217,17 +219,7 @@ impl AiTuning {
             },
             // Quick hands, tuned to about 600 points alone (journal S43, S44); the behaviour is
             // the measured one.
-            // The deeper searches spread over ticks (at most about 0.3 ms a tick natively, 3 ms
-            // at once before): the same strength in duel (journal S46).
-            AIDifficulty::Hard => AiTuning {
-                clear_setup: 3,
-                cooldown: 4,
-                move_gap: 1,
-                move_jitter: 1,
-                height_bias: 2,
-                lookahead_budget: 5000,
-                ..base
-            },
+            AIDifficulty::Hard => AiTuning { clear_setup: 3, cooldown: 4, move_gap: 1, move_jitter: 1, height_bias: 2, ..base },
         }
     }
 }
