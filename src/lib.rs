@@ -291,7 +291,8 @@ impl Handler for CrackAttack {
         let Some(seat) = self.seat_of(&p) else { return };
         self.catch_up(r.now_unix_nanos());
         match &mut self.stage {
-            Stage::Menu(menu) if seat == 0 => {
+            // The choices are for the room for one; in a room for two, the menu only waits.
+            Stage::Menu(menu) if seat == 0 && self.solo_room => {
                 if let Some(choice) = menu.input(input) {
                     self.start(r, choice);
                 }

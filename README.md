@@ -17,10 +17,13 @@ Ce dépôt emporte tout ce dont il a besoin et ne dépend pas du dépôt princip
 Le choix entre seul et à deux se fait dans l'arcade : elle propose « Solo »
 (une place) et « Duel » (partie rapide, ou salle privée sur invitation).
 
-Dans le jeu, un menu sous le logo propose le solo ou un duel contre l'ordinateur
-(l'IA du moteur : Logic, facile, Sigma, moyen, ou Cortex, difficile). Dans une
-salle à deux places, ce menu est aussi l'écran d'attente : un adversaire qui
-arrive avant le choix lance le duel ; arrivé après, il regarde.
+Dans une salle Solo, un menu sous le logo propose le solo ou un duel contre
+l'ordinateur (l'IA du moteur : Logic, facile, Sigma, moyen, ou Cortex,
+difficile). Dans une salle Duel, le logo n'annonce que l'attente d'un adversaire :
+le duel commence quand il arrive. Un troisième venu regarde.
+
+En local, `tools/shellcade-kit play .` ouvre une salle à deux places (l'attente) ;
+`--seats 1` ouvre la salle Solo et son menu.
 
 Cortex est ici une version allégée de celui du dépôt principal : sans le jeu
 pendant les chutes, sans les chaînes préparées en trois coups ni les combos

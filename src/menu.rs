@@ -65,10 +65,20 @@ impl Menu {
         None
     }
 
-    /// The logo, then the choices; `waiting` for an opponent, it says so.
+    /// The logo, then the choices. In a room for two (`waiting`), only the wait for an
+    /// opponent: the player chose a duel in the arcade's mode picker, the solo game and the
+    /// computer are in the room for one.
     pub(crate) fn compose(&self, canvas: &mut Frame, waiting: bool) {
-        let header = if waiting { ("Waiting for an opponent... or play:", Tone::Strong) } else { ("Play:", Tone::Strong) };
-        let mut lines = vec![(header.0.to_string(), header.1), (String::new(), Tone::Plain)];
+        if waiting {
+            let lines = [
+                ("Waiting for an opponent...".to_string(), Tone::Strong),
+                (String::new(), Tone::Plain),
+                ("Esc: leave".to_string(), Tone::Hint),
+            ];
+            render::compose_logo_screen(canvas, &lines);
+            return;
+        }
+        let mut lines = vec![("Play:".to_string(), Tone::Strong), (String::new(), Tone::Plain)];
         for (i, choice) in CHOICES.iter().enumerate() {
             lines.push(if i == self.selected {
                 (format!("> {} <", choice.label()), Tone::Won)
