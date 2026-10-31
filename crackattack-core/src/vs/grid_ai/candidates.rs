@@ -3,6 +3,7 @@
 //! opportunistic play and the timing play during a fall all start from this list and differ
 //! only in what they value.
 
+use super::controller::AiController;
 use super::planner::{evaluate_swap, Cascade, PlanBoard, PLAN_BLOCKED, PLAN_GARBAGE};
 use super::view::SwapPlan;
 
@@ -52,4 +53,61 @@ pub(super) fn trigger_swaps(
         }
     }
     found
+}
+
+/// Boards whose triggering swaps are kept: the strategic scan, the plays during motion and the
+/// retries of `plan_meanwhile` look at a few boards, the same ones tick after tick while the
+/// board falls or wakes up.
+const CACHED_BOARDS: usize = 4;
+
+/// The part of `trigger_swaps` that depends on the board alone: every swap that triggers a
+/// cascade, evaluated, in scan order. The caller's filters and the distance are applied on
+/// reading. Purely an optimisation, like `Memo`: the boards are compared whole, so the result
+/// is the one a fresh scan would give.
+pub(super) struct SwapCache {
+    /// Most recently used first.
+    boards: Vec<(PlanBoard, Vec<(SwapPlan, Cascade)>)>,
+}
+
+impl SwapCache {
+    pub(super) fn new() -> Self {
+        Self { boards: Vec::new() }
+    }
+
+    fn swaps(&mut self, board: &PlanBoard) -> &[(SwapPlan, Cascade)] {
+        match self.boards.iter().position(|(b, _)| b == board) {
+            Some(i) => self.boards[..=i].rotate_right(1),
+            None => {
+                let swaps = trigger_swaps(board, (0, 0), |_| false, |_| true)
+                    .into_iter()
+                    .map(|c| (c.plan, c.cascade))
+                    .collect();
+                self.boards.truncate(CACHED_BOARDS - 1);
+                self.boards.insert(0, (board.clone(), swaps));
+            }
+        }
+        &self.boards[0].1
+    }
+}
+
+impl AiController {
+    /// `trigger_swaps`, read from the swap cache.
+    pub(super) fn trigger_swaps(
+        &self,
+        board: &PlanBoard,
+        cursor: (i32, i32),
+        excluded: impl Fn(SwapPlan) -> bool,
+        legal: impl Fn(SwapPlan) -> bool,
+    ) -> Vec<Candidate> {
+        let mut cache = self.swap_cache.borrow_mut();
+        cache
+            .swaps(board)
+            .iter()
+            .filter(|(plan, _)| !excluded(*plan) && legal(*plan))
+            .map(|&(plan, cascade)| {
+                let dist = (plan.x - cursor.0).abs() + (plan.y - cursor.1).abs();
+                Candidate { plan, cascade, dist }
+            })
+            .collect()
+    }
 }

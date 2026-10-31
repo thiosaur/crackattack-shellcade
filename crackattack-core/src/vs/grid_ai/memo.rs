@@ -19,6 +19,17 @@ impl<K: PartialEq, T: Copy> Memo<K, T> {
         }
         self.value
     }
+
+    /// The answer kept for `key`, if it is the one kept (`Some(None)`: no plan).
+    pub(super) fn cached(&self, key: K) -> Option<Option<T>> {
+        (self.key.as_ref() == Some(&key)).then_some(self.value)
+    }
+
+    /// Keep `value` as the answer for `key`, computed elsewhere.
+    pub(super) fn put(&mut self, key: K, value: Option<T>) {
+        self.key = Some(key);
+        self.value = value;
+    }
 }
 
 #[cfg(test)]

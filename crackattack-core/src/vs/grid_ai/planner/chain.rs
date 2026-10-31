@@ -57,56 +57,90 @@ pub(crate) fn plan_chain_setup(board: &PlanBoard, opts: &ChainSetupOptions) -> O
     if direct.is_some() || !opts.lookahead {
         return direct;
     }
+    Lookahead::default().resume(board, opts, usize::MAX).0.flatten()
+}
 
-    // No single enabler exists: look one level deeper. The candidate move is a setup swap
-    // after which a single enabler *does* exist; it inherits that enabler's eventual
-    // score. Only runs in enabler-less positions, and the run3 prefilter keeps the inner
-    // searches cheap.
-    let mut best: Option<ChainSetupPlan> = None;
-    let mut best_rank = 0u32;
-    let mut b2 = board.clone();
-    for sy in 0..board.height {
-        for sx in 0..board.width - 1 {
+/// The deeper level of [`plan_chain_setup`] in progress, for a caller that spreads it over
+/// several calls: the first swaps tried so far and the best one found.
+///
+/// No single enabler exists: look one level deeper. The candidate move is a setup swap after
+/// which a single enabler *does* exist; it inherits that enabler's eventual score. Only runs in
+/// enabler-less positions, and the run3 prefilter keeps the inner searches cheap.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Lookahead {
+    /// The next first swap to try, as `y * (width - 1) + x`.
+    next: usize,
+    best: Option<ChainSetupPlan>,
+    best_rank: u32,
+}
+
+impl Lookahead {
+    /// Go on until `budget` work is spent (see `counted_search_enabler`; an inner search started
+    /// is finished): the answer once every first swap has been tried (`None` inside when none
+    /// enables anything), and the work spent.
+    pub(crate) fn resume(
+        &mut self,
+        board: &PlanBoard,
+        opts: &ChainSetupOptions,
+        budget: usize,
+    ) -> (Option<Option<ChainSetupPlan>>, usize) {
+        let mut spent = 0;
+        let mut b2 = board.clone();
+        let row = board.width - 1;
+        while self.next < board.height * row {
+            let (sx, sy) = (self.next % row, self.next / row);
             let a = board.get(sx, sy);
             let c = board.get(sx + 1, sy);
-            if a < 0 || c < 0 {
-                continue; // setups are block<->block only
+            let setup = a >= 0 && c >= 0 // setups are block<->block only
+                && map_flavor_to_base_flavor(a) != map_flavor_to_base_flavor(c) // no-op
+                && !makes_run3(board, sx, sy); // that's a clear, not a setup
+            if !setup {
+                self.next += 1;
+                continue;
             }
-            if map_flavor_to_base_flavor(a) == map_flavor_to_base_flavor(c) {
-                continue; // no-op
+            if spent >= budget {
+                return (None, spent);
             }
-            if makes_run3(board, sx, sy) {
-                continue; // that's a clear, not a setup
-            }
+            self.next += 1;
             b2.cell.copy_from_slice(&board.cell);
             b2.set(sx, sy, c);
             b2.set(sx + 1, sy, a);
-            let enabled = search_enabler(&b2, opts);
+            let enabled = counted_search_enabler(&b2, opts, &mut spent);
             let rank = seeded_rank(opts.tie_seed, &[0x4c4f4f4b, sx, sy]);
             if let Some(enabled) = enabled {
-                let better = match &best {
+                let better = match &self.best {
                     None => true,
                     Some(b) => {
                         enabled.score > b.score
-                            || (enabled.score == b.score && opts.tie_seed.is_some() && rank > best_rank)
+                            || (enabled.score == b.score && opts.tie_seed.is_some() && rank > self.best_rank)
                     }
                 };
                 if better {
-                    best = Some(ChainSetupPlan {
+                    self.best = Some(ChainSetupPlan {
                         x: sx,
                         y: sy,
                         score: enabled.score,
                     });
-                    best_rank = rank;
+                    self.best_rank = rank;
                 }
             }
         }
+        (Some(self.best), spent)
     }
-    best
 }
 
+/// Work of a full cascade simulation, in trigger positions examined (measured about ten times
+/// as long).
+const SIMULATION_WORK: usize = 10;
+
 /// The single-enabler search behind [`plan_chain_setup`] (one setup + trigger).
-pub(super) fn search_enabler(board: &PlanBoard, opts: &ChainSetupOptions) -> Option<ChainSetupPlan> {
+pub(crate) fn search_enabler(board: &PlanBoard, opts: &ChainSetupOptions) -> Option<ChainSetupPlan> {
+    counted_search_enabler(board, opts, &mut 0)
+}
+
+/// `search_enabler`, adding its work to `work`: trigger positions examined, and
+/// `SIMULATION_WORK` per cascade simulated.
+fn counted_search_enabler(board: &PlanBoard, opts: &ChainSetupOptions, work: &mut usize) -> Option<ChainSetupPlan> {
     let mut best: Option<ChainSetupPlan> = None;
     let mut best_rank = 0u32;
     let mut b2 = board.clone();
@@ -131,6 +165,7 @@ pub(super) fn search_enabler(board: &PlanBoard, opts: &ChainSetupOptions) -> Opt
 
             for ty in 0..b2.height {
                 for tx in 0..b2.width - 1 {
+                    *work += 1;
                     if tx == sx && ty == sy {
                         continue; // undoing the setup is pointless
                     }
@@ -149,6 +184,7 @@ pub(super) fn search_enabler(board: &PlanBoard, opts: &ChainSetupOptions) -> Opt
                     if !fall_through && !makes_run3(&b2, tx, ty) {
                         continue;
                     }
+                    *work += SIMULATION_WORK;
                     let cas = evaluate_swap(&b2, tx, ty);
                     if cas.chain_depth < opts.min_chain && cas.max_round < opts.min_run {
                         continue;

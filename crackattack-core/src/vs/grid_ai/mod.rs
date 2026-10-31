@@ -19,6 +19,8 @@ mod transient;
 mod view;
 #[cfg(test)]
 mod arena;
+#[cfg(test)]
+mod load;
 
 use crate::game_state::GameState;
 use crate::ai_difficulty::AIDifficulty;

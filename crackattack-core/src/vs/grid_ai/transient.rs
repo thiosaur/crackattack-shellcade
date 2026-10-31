@@ -5,7 +5,7 @@ use crate::game_state::GameState;
 
 use super::controller::AiController;
 use super::planner::{attack_value, evaluate_gravity, settled, PlanBoard};
-use super::candidates::{trigger_swaps, Candidate};
+use super::candidates::Candidate;
 use super::select::Best;
 use super::view::*;
 
@@ -86,9 +86,13 @@ impl AiController {
             let intent = if self.tuning.strategic {
                 self.plan_strategic(game, board.clone(), cursor_x, cursor_y, avoid, true)
             } else {
-                self.plan_reactive(game, cursor_x, cursor_y, avoid).map_or(Intent::Wait, Intent::Swap)
+                self.plan_reactive(game, cursor_x, cursor_y, avoid).map_or(Intent::Raise, Intent::Swap)
             };
-            let Intent::Swap(plan) = intent else { return Intent::Raise };
+            let plan = match intent {
+                Intent::Swap(plan) => plan,
+                Intent::Wait => return Intent::Wait,
+                Intent::Raise => return Intent::Raise,
+            };
             if can_swap_now(game, plan.x, plan.y) && !self.in_chain_zone(&zone, plan.x, plan.y) {
                 return Intent::Swap(plan);
             }
@@ -121,7 +125,7 @@ impl AiController {
     ) -> Option<SwapPlan> {
         let cursor = (game.swapper.x, game.swapper.y);
         let mut best = Best::new();
-        let swaps = trigger_swaps(
+        let swaps = self.trigger_swaps(
             board,
             cursor,
             |plan| self.in_chain_zone(zone, plan.x, plan.y) || avoid.contains(plan),
@@ -147,7 +151,7 @@ impl AiController {
         linked_gravity: bool,
     ) -> Option<SwapPlan> {
         let mut best = Best::new();
-        let swaps = trigger_swaps(
+        let swaps = self.trigger_swaps(
             board,
             (cursor_x, cursor_y),
             |plan| avoid.contains(plan),

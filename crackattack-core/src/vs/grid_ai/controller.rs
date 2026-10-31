@@ -19,7 +19,8 @@
 use crate::game_state::GameState;
 use crate::input::INPUT_ADVANCE;
 
-use super::planner::{BigComboSetupPlan, ChainSetupPlan, SetupPlan};
+use super::candidates::SwapCache;
+use super::planner::{BigComboSetupPlan, ChainSetupPlan, ClearSearch, Lookahead, SetupPlan};
 use super::memo::Memo;
 use super::strategic::ChainSetupKey;
 use super::tuning::*;
@@ -56,6 +57,15 @@ pub(crate) struct AiController {
     pub(super) chain_memo: Memo<ChainSetupKey, ChainSetupPlan>,
     pub(super) big_combo_memo: Memo<(u32, i32), BigComboSetupPlan>,
     pub(super) clear_memo: Memo<(u32, i32), SetupPlan>,
+    pub(super) shatter_memo: Memo<(u32, i32), SetupPlan>,
+    /// The deeper searches under way, for the board of their key (see `lookahead_budget`), and
+    /// the work they may still do this tick.
+    pub(super) chain_pending: Option<(ChainSetupKey, Lookahead)>,
+    pub(super) clear_pending: Option<((u32, i32), ClearSearch)>,
+    pub(super) lookahead_left: usize,
+    /// The triggering swaps of the last boards looked at (see `SwapCache`). In a cell because
+    /// the plays that read it only borrow the controller.
+    pub(super) swap_cache: std::cell::RefCell<SwapCache>,
     /// The last swap issued and the board it was issued on, to refuse an exact undo.
     pub(super) last_swap: Option<(SwapPlan, u32)>,
     /// The last few swaps as the rows they changed, to refuse a swap that restores a row (see
@@ -88,6 +98,11 @@ impl AiController {
             chain_memo: Memo::new(),
             big_combo_memo: Memo::new(),
             clear_memo: Memo::new(),
+            shatter_memo: Memo::new(),
+            chain_pending: None,
+            clear_pending: None,
+            lookahead_left: 0,
+            swap_cache: std::cell::RefCell::new(SwapCache::new()),
             last_swap: None,
             recent_swaps: Vec::new(),
         }
@@ -126,6 +141,7 @@ impl AiController {
             return held;
         }
         self.adapt(game);
+        self.lookahead_left = self.tuning.lookahead_budget.max(0) as usize;
         if self.resting() {
             return 0;
         }

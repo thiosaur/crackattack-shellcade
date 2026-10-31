@@ -8,9 +8,11 @@ use crate::game_state::GameState;
 use super::controller::AiController;
 use super::planner::{
     attack_value, can_swap, hash_plan_board, plan_big_combo_setup, plan_chain_setup, plan_clear_setup, plan_shatter_setup,
-    plan_undermine, BigComboSetupPlan, ChainSetupOptions, PlanBoard, PLAN_GARBAGE,
+    plan_undermine, search_enabler, BigComboSetupPlan, ChainSetupOptions, ChainSetupPlan, ClearSearch, Lookahead, PlanBoard,
+    SetupPlan,
+    PLAN_GARBAGE,
 };
-use super::candidates::{trigger_swaps, Candidate};
+use super::candidates::Candidate;
 use super::select::Best;
 use super::view::{block_count, Avoid, Intent, SwapPlan, HEIGHT, SAFE};
 
@@ -22,6 +24,8 @@ enum Step {
     Raise,
     /// Not my business: ask the next rule.
     Pass,
+    /// Still searching (the search goes on next tick): do nothing meanwhile.
+    Wait,
 }
 
 /// What the chain-enabler search depends on: the board and the options that shape it (the tie
@@ -109,6 +113,7 @@ impl AiController {
             match rule(self, game, &situation) {
                 Step::Swap(plan) => return Intent::Swap(plan),
                 Step::Raise => return Intent::Raise,
+                Step::Wait => return Intent::Wait,
                 Step::Pass => {}
             }
         }
@@ -148,7 +153,7 @@ impl AiController {
     ) -> (Option<Fire>, Option<SwapPlan>) {
         let mut fire = Best::new();
         let mut clear = Best::new();
-        let swaps = trigger_swaps(
+        let swaps = self.trigger_swaps(
             board,
             (cursor_x, cursor_y),
             |plan| avoid.contains(plan),
@@ -213,7 +218,7 @@ impl AiController {
         if cost <= 0 {
             return Step::Pass;
         }
-        match plan_shatter_setup(&s.board, cost).and_then(|p| {
+        match self.shatter_memo.get((hash_plan_board(&s.board), cost), || plan_shatter_setup(&s.board, cost)).and_then(|p| {
             s.allowed(SwapPlan::from_plan(p.x, p.y))
         }) {
             Some(plan) => Step::Swap(plan),
@@ -292,11 +297,43 @@ impl AiController {
             shatter_weight: options.shatter_weight,
             lookahead: options.lookahead,
         };
-        let found = self.chain_memo.get(key, || plan_chain_setup(&s.board, &options));
+        let found = match self.chain_memo.cached(key) {
+            Some(found) => found,
+            None => match self.chain_search(&s.board, &options, key) {
+                Some(found) => {
+                    self.chain_memo.put(key, found);
+                    found
+                }
+                None => return Step::Wait,
+            },
+        };
         match found.and_then(|c| s.allowed(SwapPlan::from_plan(c.x, c.y))) {
             Some(plan) => Step::Swap(plan),
             None => Step::Pass,
         }
+    }
+
+    /// `plan_chain_setup`, spread over ticks when `lookahead_budget` is set: the deeper level
+    /// stops once that work is spent in a tick and goes on from there next tick, while the board
+    /// (the key) is unchanged. `None` while it is not done.
+    fn chain_search(&mut self, board: &PlanBoard, options: &ChainSetupOptions, key: ChainSetupKey) -> Option<Option<ChainSetupPlan>> {
+        if self.tuning.lookahead_budget <= 0 {
+            return Some(plan_chain_setup(board, options));
+        }
+        if self.chain_pending.map_or(true, |(k, _)| k != key) {
+            let direct = search_enabler(board, options);
+            if direct.is_some() || !options.lookahead {
+                return Some(direct);
+            }
+            self.chain_pending = Some((key, Lookahead::default()));
+        }
+        let (_, search) = self.chain_pending.as_mut()?;
+        let (found, spent) = search.resume(board, options, self.lookahead_left);
+        self.lookahead_left = self.lookahead_left.saturating_sub(spent);
+        if found.is_some() {
+            self.chain_pending = None;
+        }
+        found
     }
 
     /// No larger construction: take a productive plain clear before shuffling or raising.
@@ -323,11 +360,38 @@ impl AiController {
             return Step::Pass;
         }
         let seed = self.decision_seed;
-        let plan = self.clear_memo.get((hash_plan_board(&s.board), depth), || plan_clear_setup(&s.board, depth, seed));
+        let key = (hash_plan_board(&s.board), depth);
+        let plan = match self.clear_memo.cached(key) {
+            Some(plan) => plan,
+            None => match self.clear_search(&s.board, depth, seed, key) {
+                Some(plan) => {
+                    self.clear_memo.put(key, plan);
+                    plan
+                }
+                None => return Step::Wait,
+            },
+        };
         match plan.and_then(|p| s.allowed(SwapPlan::from_plan(p.x, p.y))) {
             Some(plan) => Step::Swap(plan),
             None => Step::Pass,
         }
+    }
+
+    /// `plan_clear_setup`, spread over ticks like `chain_search` (same budget).
+    fn clear_search(&mut self, board: &PlanBoard, depth: i32, seed: Option<u32>, key: (u32, i32)) -> Option<Option<SetupPlan>> {
+        if self.tuning.lookahead_budget <= 0 {
+            return Some(plan_clear_setup(board, depth, seed));
+        }
+        if self.clear_pending.map_or(true, |(k, _)| k != key) {
+            self.clear_pending = Some((key, ClearSearch::default()));
+        }
+        let (_, search) = self.clear_pending.as_mut()?;
+        let (found, spent) = search.resume(board, depth, seed, self.lookahead_left);
+        self.lookahead_left = self.lookahead_left.saturating_sub(spent);
+        if found.is_some() {
+            self.clear_pending = None;
+        }
+        found
     }
 
     /// Last resort before advancing: dig a block into a gap. Final.

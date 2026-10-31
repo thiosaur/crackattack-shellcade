@@ -29,6 +29,10 @@ pub(crate) struct AiTuning {
     pub chain_setup: bool,
     /// When no single chain enabler exists, search one level deeper.
     pub chain_lookahead: bool,
+    /// Load, not behaviour (or barely): the deeper searches (chains in three swaps, plain clears
+    /// in three) do at most about this much work per tick (swaps examined, see `Lookahead` and
+    /// `ClearSearch`), and the bot waits for their answer; 0 does them all at once.
+    pub lookahead_budget: i32,
     /// Crossed-column x8/x10 combo construction while safe, up to this many lateral swaps; 0 off.
     pub big_combo_setup_max_cost: i32,
     /// A cascade at least this deep is worth firing (2 = any chain).
@@ -107,6 +111,7 @@ macro_rules! knobs {
                         // Pacing, not behaviour: not a blended knob, but sweepable for speed tests.
                         "cooldown" => self.cooldown = v,
                         "strategic" => self.strategic = v == 1,
+                        "lookahead_budget" => self.lookahead_budget = v,
                         $(stringify!($num) => self.$num = v,)*
                         $(stringify!($flag) => {
                             if v != 0 && v != 1 {
@@ -132,7 +137,7 @@ knobs! {
     blended_flags: [
         flatten, undermine, chain_setup, chain_lookahead, opportunism, opportunism_linked, wake_prep, raise_in_motion, act_when_frozen, row_undo_guard, clear_in_motion
     ],
-    fixed: [cooldown, strategic]
+    fixed: [cooldown, strategic, lookahead_budget]
 }
 
 impl AiTuning {
@@ -156,6 +161,7 @@ impl AiTuning {
             undermine: true,
             chain_setup: true,
             chain_lookahead: true,
+            lookahead_budget: 0,
             big_combo_setup_max_cost: 18,
             fire_min_chain: 2,
             fire_min_run: 4,
@@ -211,7 +217,17 @@ impl AiTuning {
             },
             // Quick hands, tuned to about 600 points alone (journal S43, S44); the behaviour is
             // the measured one.
-            AIDifficulty::Hard => AiTuning { clear_setup: 3, cooldown: 4, move_gap: 1, move_jitter: 1, height_bias: 2, ..base },
+            // The deeper searches spread over ticks (at most about 0.3 ms a tick natively, 3 ms
+            // at once before): the same strength in duel (journal S46).
+            AIDifficulty::Hard => AiTuning {
+                clear_setup: 3,
+                cooldown: 4,
+                move_gap: 1,
+                move_jitter: 1,
+                height_bias: 2,
+                lookahead_budget: 5000,
+                ..base
+            },
         }
     }
 }

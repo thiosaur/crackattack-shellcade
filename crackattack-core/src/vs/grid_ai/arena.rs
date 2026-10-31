@@ -333,15 +333,15 @@ fn print_golden_decisions() {
 }
 
 const GOLDEN_HASHES: [[u64; 2]; 10] = [
-    [0xe297ac0410e9f4f1, 0x78c357d13cdaea00],
-    [0x7837687098873de9, 0x5f63b86564d855bb],
+    [0x5d332a034a481edc, 0x4bfba5f8521af9a8],
+    [0x8c13a1a7f2113fed, 0x9db0f846cb9c74ed],
     [0x5e9e2cae3fe51471, 0x7c381d59a606fe01],
     [0x3357c25cb56dfda3, 0x15131f475f8b885e],
-    [0xef6f10d472a001ae, 0x939bd8ba895ff959],
-    [0x149265f0ec3d0bcc, 0x5ebdd286a8f8b051],
-    [0x20058164c733a32a, 0xc0dfa018d632d589],
-    [0x6f7cc062dfd060f5, 0x37277040f86b3e93],
-    [0x59dff82124b0a7aa, 0x4e0756bbd68be029],
+    [0x4185aab17f66ef1a, 0xb8d2c3470cc5e445],
+    [0xd9f1824e3ca7c9fc, 0x97698d862fd61d6d],
+    [0xd27e73eca483b778, 0x9438fd832123faaa],
+    [0x36ff74360848b6bb, 0x8e26435b5082ebac],
+    [0x1b15e6307d3541ba, 0x5a3cf1e0e97ddd84],
     [0xc05c59b20c5979c6, 0xd2a764215771137e],
 ];
 

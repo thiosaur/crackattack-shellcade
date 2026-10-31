@@ -20,18 +20,18 @@ pub(crate) struct Cascade {
 
 /// Settle every block straight down onto the floor / garbage / the block below.
 pub(super) fn apply_gravity(b: &mut PlanBoard) {
-    for x in 0..b.width {
+    for column in b.cell.chunks_exact_mut(b.height) {
         // `write` is the next free row from the bottom of the current segment.
         // Garbage and blocked cells are fixed (blocks rest on them), so they reset the segment.
         let mut write = 0;
-        for y in 0..b.height {
-            let v = b.get(x, y);
+        for y in 0..column.len() {
+            let v = column[y];
             if v == PLAN_GARBAGE || v == PLAN_BLOCKED {
                 write = y + 1; // blocks above land on top of the garbage
             } else if v >= 0 {
                 if write != y {
-                    b.set(x, write, v);
-                    b.set(x, y, PLAN_EMPTY);
+                    column[write] = v;
+                    column[y] = PLAN_EMPTY;
                 }
                 write += 1;
             }
@@ -48,62 +48,62 @@ pub(crate) fn settled(board: &PlanBoard) -> PlanBoard {
 }
 
 /// Find every cell in a 3+ run (horizontal or vertical) of matching flavours.
-/// Returns the marked cells (a mask indexed by `x*height+y`), their count, and the largest
-/// single run.
-pub(super) fn find_matches(b: &PlanBoard) -> (Vec<bool>, i32, i32) {
-    let mut marked = vec![false; b.cell.len()];
+/// Marks them in `marked` (a mask indexed by `x*height+y`, of the board's size, cleared here)
+/// and returns their count and the largest single run.
+pub(super) fn find_matches(b: &PlanBoard, marked: &mut [bool]) -> (i32, i32) {
+    marked.fill(false);
+    let (w, h, cell) = (b.width, b.height, &b.cell[..]);
+    // Two neighbours of one run: blocks of the same flavour, gray excepted (`flavor_match`).
+    let joins = |p: i16, q: i16| p >= 0 && q >= 0 && flavor_match(p, q);
     let mut count = 0;
     let mut largest = 0;
-    let mut mark = |idx: usize, marked: &mut Vec<bool>| {
-        if !marked[idx] {
-            marked[idx] = true;
-            count += 1;
+    // The run ending before `end` (exclusive), `run` cells long, every `step` cells.
+    let mut close = |end: usize, run: usize, step: usize, marked: &mut [bool]| {
+        if run >= 3 {
+            largest = largest.max(run as i32);
+            for k in 1..=run {
+                let idx = end - k * step;
+                if !marked[idx] {
+                    marked[idx] = true;
+                    count += 1;
+                }
+            }
         }
     };
     // Horizontal runs.
-    for y in 0..b.height {
+    for y in 0..h {
         let mut run = 1;
-        for x in 1..=b.width {
-            let same =
-                x < b.width && b.is_block(x, y) && b.is_block(x - 1, y) && flavor_match(b.get(x, y), b.get(x - 1, y));
-            if same {
+        for x in 1..w {
+            if joins(cell[x * h + y], cell[(x - 1) * h + y]) {
                 run += 1;
             } else {
-                if run >= 3 {
-                    largest = largest.max(run as i32);
-                    for k in (x - run)..x {
-                        mark(k * b.height + y, &mut marked);
-                    }
-                }
+                close(x * h + y, run, h, marked);
                 run = 1;
             }
         }
+        close(w * h + y, run, h, marked);
     }
     // Vertical runs.
-    for x in 0..b.width {
+    for x in 0..w {
+        let column = x * h;
         let mut run = 1;
-        for y in 1..=b.height {
-            let same =
-                y < b.height && b.is_block(x, y) && b.is_block(x, y - 1) && flavor_match(b.get(x, y), b.get(x, y - 1));
-            if same {
+        for y in 1..h {
+            if joins(cell[column + y], cell[column + y - 1]) {
                 run += 1;
             } else {
-                if run >= 3 {
-                    largest = largest.max(run as i32);
-                    for k in (y - run)..y {
-                        mark(x * b.height + k, &mut marked);
-                    }
-                }
+                close(column + y, run, 1, marked);
                 run = 1;
             }
         }
+        close(column + h, run, 1, marked);
     }
-    (marked, count, largest)
+    (count, largest)
 }
 
-/// Remove garbage cells 4-adjacent to any matched cell; return how many.
+/// Remove garbage cells 4-adjacent to any matched cell; return how many. Removed on the spot:
+/// whether a cell touches a match does not depend on the garbage already removed.
 pub(super) fn shatter_adjacent(b: &mut PlanBoard, marked: &[bool]) -> i32 {
-    let mut to_clear: Vec<usize> = Vec::new();
+    let mut shattered = 0;
     let h = b.height;
     for x in 0..b.width {
         for y in 0..h {
@@ -115,30 +115,33 @@ pub(super) fn shatter_adjacent(b: &mut PlanBoard, marked: &[bool]) -> i32 {
                 || (y > 0 && marked[x * h + (y - 1)])
                 || (y + 1 < h && marked[x * h + (y + 1)]);
             if touches {
-                to_clear.push(x * h + y);
+                b.cell[x * h + y] = PLAN_EMPTY;
+                shattered += 1;
             }
         }
     }
-    for &idx in &to_clear {
-        b.cell[idx] = PLAN_EMPTY;
-    }
-    to_clear.len() as i32
+    shattered
 }
 
 /// Run the cascade on `b` (mutated): settle gravity, clear 3+ runs, repeat until stable.
 /// A board that triggers nothing returns an all-zero cascade.
 pub(super) fn evaluate_cascade(b: &mut PlanBoard) -> Cascade {
+    evaluate_cascade_in(b, &mut vec![false; b.cell.len()])
+}
+
+/// `evaluate_cascade` with the match mask given (the board's size; its contents do not matter).
+fn evaluate_cascade_in(b: &mut PlanBoard, marked: &mut [bool]) -> Cascade {
     let mut result = Cascade::default();
     loop {
         apply_gravity(b);
-        let (marked, count, largest) = find_matches(b);
+        let (count, largest) = find_matches(b, marked);
         if count == 0 {
             break;
         }
         result.chain_depth += 1;
         result.total_cleared += count;
         result.max_round = result.max_round.max(largest);
-        result.garbage_shattered += shatter_adjacent(b, &marked);
+        result.garbage_shattered += shatter_adjacent(b, marked);
         for (idx, &m) in marked.iter().enumerate() {
             if m {
                 b.cell[idx] = PLAN_EMPTY;
