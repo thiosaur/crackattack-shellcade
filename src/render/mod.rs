@@ -163,7 +163,7 @@ pub(crate) fn compose_duel(canvas: &mut Frame, view: &DuelView) {
     out.text("ATTACK!", Pen::bold(Some(LOGO_COLORS[1])));
 
     center(canvas, 2, &format!("Round {}", view.round), Pen::default());
-    let tally = |side: &DuelSide, name: &str| format!("{:<12}{:>3}", truncate(name, 12), side.wins);
+    let tally = |side: &DuelSide, name: &str| format!("{:<20}{:>3}", truncate(name, 20), side.wins);
     center(canvas, 4, &tally(&view.own, "You"), Pen::bold(None));
     center(canvas, 5, &tally(&view.other, view.other.name), Pen::default());
     let seconds = view.own.frame.ui.clock_time / STEPS_PER_SECOND;

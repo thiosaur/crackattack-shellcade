@@ -3,13 +3,15 @@
 // the same tick: no network, no lag, no desync.
 //
 // Between rounds, each player consents to the next one (the logo screen); the round
-// starts for both at the same tick, once both have.
+// starts for both at the same tick, once both have. Against the computer, side 1 is the
+// engine's AI, always ready.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crackattack_core::ai_difficulty::AIDifficulty;
 use crackattack_core::frame_data::CountdownDigit;
-use crackattack_core::vs::{Opponent, RoundOutcome, SessionPhase, VsSession};
+use crackattack_core::vs::{GridAutoplay, Opponent, RoundOutcome, SessionPhase, VsSession};
 use crackattack_core::FrameData;
 use shellcade_kit::prelude::{Frame, Input, Key, Player, PlayerResult, Status};
 
@@ -92,6 +94,9 @@ pub(crate) struct Duel {
     /// The side that left: the duel stands still until they come back, or the one who
     /// stayed ends it.
     away: Option<usize>,
+    /// Against the computer: its level, and the AI playing side 1 (a new one each round).
+    computer: Option<(AIDifficulty, GridAutoplay)>,
+    seed: u32,
 }
 
 impl Duel {
@@ -116,9 +121,23 @@ impl Duel {
             last_won: [None; 2],
             best: [0; 2],
             away: None,
+            computer: None,
+            seed,
         };
         duel.start_round();
         duel
+    }
+
+    /// Against the computer at `level`: the player is side 0.
+    pub(crate) fn against_computer(seed: u32, player: String, level: AIDifficulty) -> Self {
+        let mut duel = Self::new(seed, [player, crate::menu::computer_name(level)]);
+        duel.computer = Some((level, GridAutoplay::new(level, seed)));
+        duel
+    }
+
+    /// Against the computer (not a result for the leaderboard).
+    pub(crate) fn against_computer_on(&self) -> bool {
+        self.computer.is_some()
     }
 
     /// Both sessions into the countdown of the round prepared, at the same tick.
@@ -129,6 +148,10 @@ impl Duel {
             self.last[side] = self.sessions[side].player_game.frame_data();
         }
         self.ready = [false; 2];
+        if let Some((level, ai)) = &mut self.computer {
+            // The seed only varies the AI's choices between equal moves.
+            *ai = GridAutoplay::new(*level, self.seed.wrapping_add(self.sessions[1].round_number as u32));
+        }
     }
 
     /// A player left: nothing moves.
@@ -155,6 +178,13 @@ impl Duel {
     pub(crate) fn tick(&mut self) {
         if self.suspended() {
             return;
+        }
+        if let Some((_, ai)) = &mut self.computer {
+            // Always ready, and playing as the engine's computer opponent does.
+            self.ready[1] = true;
+            if self.sessions[1].phase() == SessionPhase::Playing {
+                self.seats[1].press_keys(ai.update(&self.sessions[1].player_game));
+            }
         }
         if (0..2).all(|side| self.between_rounds(side) && self.ready[side]) {
             self.start_round();
@@ -336,6 +366,23 @@ mod tests {
         assert!(received, "no garbage reached side 1");
         // The AI outlasts a player who does nothing.
         assert_eq!(duel.last_won, [Some(true), Some(false)]);
+    }
+
+    #[test]
+    fn the_computer_plays_side_1_and_is_always_ready() {
+        let mut duel = Duel::against_computer(42, "Ann".to_string(), AIDifficulty::Hard);
+        assert_eq!(duel.names[1], "Cortex (hard)");
+        play_round(&mut duel);
+        // The computer beats a player who does nothing.
+        assert_eq!(duel.last_won, [Some(false), Some(true)]);
+        for _ in 0..10 {
+            duel.tick();
+        }
+        assert!(duel.between_rounds(0), "the next round waits for the player only");
+        duel.input(0, Input::Key(Key::Enter));
+        duel.tick();
+        assert_eq!(duel.sessions[0].phase(), SessionPhase::Countdown);
+        assert_eq!(duel.sessions[1].round_number, 2);
     }
 
     #[test]

@@ -9,14 +9,21 @@ Ce dépôt emporte tout ce dont il a besoin et ne dépend pas du dépôt princip
 | Dossier | Contenu |
 |---|---|
 | `crackattack-core/` | Le moteur du jeu, **copié sans modification** du dépôt principal (`rust/`, commit `f1ecbc6`). On n'y touche pas : une évolution du moteur se reprend par une nouvelle copie. |
-| `src/` | Le jeu shellcade : la salle et l'horloge (`lib.rs`), la partie solo (`solo.rs`), le duel (`duel.rs`), les touches et l'habillage d'un joueur (`seat.rs`), l'affichage compact du terminal porté sur la grille de l'arcade (`render/`), les barres de danger (`danger.rs`). |
+| `src/` | Le jeu shellcade : la salle et l'horloge (`lib.rs`), le menu (`menu.rs`), la partie solo (`solo.rs`), le duel, contre un joueur ou l'ordinateur (`duel.rs`), les touches et l'habillage d'un joueur (`seat.rs`), l'affichage compact du terminal porté sur la grille de l'arcade (`render/`), les barres de danger (`danger.rs`). |
 | `smoke.yaml` | Les écrans scriptés d'un duel, que la CI du catalogue montre en aperçu ; `smoke-solo.yaml` pour le solo. |
 
-## Solo et duel
+## Solo, contre l'ordinateur, duel
 
-Une salle solo lance une partie seule. Une salle à deux places (partie rapide
-ou invitation) attend un adversaire sur l'écran du logo ; `S` lance un solo en
-attendant.
+Le choix entre seul et à deux se fait dans l'arcade : elle propose « Solo »
+(une place) et « Duel » (partie rapide, ou salle privée sur invitation).
+
+Dans le jeu, un menu sous le logo propose le solo ou un duel contre l'ordinateur
+(l'IA du moteur : Logic, facile, ou Sigma, moyen). Dans une salle à deux places,
+ce menu est aussi l'écran d'attente : un adversaire qui arrive avant le choix
+lance le duel ; arrivé après, il regarde. Le niveau difficile (Cortex) n'est pas
+proposé : une de ses décisions peut dépasser les 100 ms qu'un appel a le droit de
+prendre en wasm (3,6 ms en natif au pire, contre 0,2 ms pour Sigma), et l'arcade
+coupe alors la salle.
 
 Le duel reprend le mode VS du moteur (manches, compte à rebours 3-2-1, déchets
 envoyés à l'autre, égalités). Les deux parties tournent dans le même module, au
@@ -27,6 +34,7 @@ la manche suivante part quand les deux ont appuyé sur Entrée. Un joueur qui pa
 fige le duel : il le reprend en revenant, ou l'autre y met fin d'une touche.
 
 Au classement : le meilleur score d'une manche (le score d'une partie en solo).
+Une partie contre l'ordinateur ne compte pas.
 
 ## Essayer
 
@@ -37,7 +45,7 @@ mkdir -p tools && curl -fsSL -o tools/kit.tar.gz \
   && tar -xzf tools/kit.tar.gz -C tools shellcade-kit && rm tools/kit.tar.gz
 
 cargo test                    # les tests, en natif
-tools/shellcade-kit play .    # construit le wasm et lance une partie dans ce terminal (S : solo)
+tools/shellcade-kit play .    # construit le wasm et lance le menu dans ce terminal
 tools/shellcade-kit play . --seats 2   # un duel ; Ctrl-T passe d'un joueur à l'autre
 tools/shellcade-kit check .   # le banc de conformité (latence, mémoire, déterminisme)
 tools/shellcade-kit smoke .   # les écrans de smoke.yaml, dans smoke-out/

@@ -1,5 +1,5 @@
-// Crack Attack! for shellcade: solo, or a duel between the two players of a room, on the
-// arcade's 80×24 canvas.
+// Crack Attack! for shellcade: solo, against the computer, or a duel between the two
+// players of a room, on the arcade's 80×24 canvas.
 //
 //   cargo test                           # natively
 //   tools/shellcade-kit play .           # build the wasm artifact and play it
@@ -12,6 +12,7 @@
 
 mod danger;
 mod duel;
+mod menu;
 mod render;
 mod seat;
 mod solo;
@@ -20,7 +21,7 @@ use crackattack_core::STEPS_PER_SECOND;
 use shellcade_kit::prelude::*;
 
 use duel::Duel;
-use render::Tone;
+use menu::{Choice, Menu};
 use solo::Solo;
 
 /// One engine tick, in nanoseconds of room time.
@@ -88,8 +89,8 @@ impl Clock {
 enum Stage {
     /// Nobody joined yet.
     Empty,
-    /// One player, waiting for an opponent (or starting a solo game).
-    Waiting,
+    /// One player, choosing a game (and in a room for two, waiting for an opponent).
+    Menu(Menu),
     Solo(Solo),
     Duel(Duel),
 }
@@ -141,19 +142,24 @@ impl CrackAttack {
             && match &self.stage {
                 Stage::Solo(solo) => !solo.paused(),
                 Stage::Duel(duel) => !duel.suspended(),
-                Stage::Empty | Stage::Waiting => false,
+                Stage::Empty | Stage::Menu(_) => false,
             };
         for _ in 0..self.clock.due(now, running) {
             match &mut self.stage {
                 Stage::Solo(solo) => solo.tick(),
                 Stage::Duel(duel) => duel.tick(),
-                Stage::Empty | Stage::Waiting => {}
+                Stage::Empty | Stage::Menu(_) => {}
             }
         }
     }
 
-    fn start_solo(&mut self, r: &mut Room) {
-        self.stage = Stage::Solo(Solo::new(r.rng_u64() as u32));
+    /// The game chosen in the menu.
+    fn start(&mut self, r: &mut Room, choice: Choice) {
+        let seed = r.rng_u64() as u32;
+        self.stage = match choice {
+            Choice::Solo => Stage::Solo(Solo::new(seed)),
+            Choice::Computer(level) => Stage::Duel(Duel::against_computer(seed, self.players[0].display_name(), level)),
+        };
         self.clock = Clock { origin: r.now_unix_nanos(), ticks: 0 };
     }
 
@@ -170,8 +176,10 @@ impl CrackAttack {
                 rank: 1,
                 status: Status::Finished,
             }).into_iter().collect(),
+            // A game against the computer is not a result for the leaderboard.
+            Stage::Duel(duel) if duel.against_computer_on() => Vec::new(),
             Stage::Duel(duel) => duel.rankings(&self.players),
-            Stage::Empty | Stage::Waiting => Vec::new(),
+            Stage::Empty | Stage::Menu(_) => Vec::new(),
         };
         r.end(&Outcome { rankings });
     }
@@ -180,20 +188,20 @@ impl CrackAttack {
     fn render(&mut self, r: &mut Room) {
         match &self.stage {
             Stage::Empty => {}
-            Stage::Waiting => {
-                let lines = [
-                    ("Waiting for an opponent...".to_string(), Tone::Strong),
-                    (String::new(), Tone::Plain),
-                    ("S: play solo meanwhile".to_string(), Tone::Hint),
-                    ("Esc: leave".to_string(), Tone::Hint),
-                ];
-                render::compose_logo_screen(&mut self.canvas, &lines);
+            Stage::Menu(menu) => {
+                menu.compose(&mut self.canvas, !self.solo_room);
                 if changed(&mut self.shown[0], &self.canvas) {
                     r.identical(&self.canvas);
                 }
             }
             Stage::Solo(solo) => {
                 solo.compose(&mut self.canvas);
+                if changed(&mut self.shown[0], &self.canvas) {
+                    r.identical(&self.canvas);
+                }
+            }
+            Stage::Duel(duel) if duel.against_computer_on() => {
+                duel.compose(0, &mut self.canvas);
                 if changed(&mut self.shown[0], &self.canvas) {
                     r.identical(&self.canvas);
                 }
@@ -237,15 +245,14 @@ impl Handler for CrackAttack {
         } else {
             self.players.push(p);
             match self.stage {
-                Stage::Empty if self.solo_room => self.start_solo(r),
-                Stage::Empty => self.stage = Stage::Waiting,
-                Stage::Waiting => {
+                Stage::Empty => self.stage = Stage::Menu(Menu::new()),
+                Stage::Menu(_) if !self.solo_room => {
                     let names = [0, 1].map(|seat| self.players[seat].display_name());
                     self.stage = Stage::Duel(Duel::new(r.rng_u64() as u32, names));
                     self.clock = Clock { origin: r.now_unix_nanos(), ticks: 0 };
                 }
-                // A solo game going on: the newcomer watches.
-                Stage::Solo(_) | Stage::Duel(_) => {}
+                // A game going on: the newcomer watches.
+                Stage::Menu(_) | Stage::Solo(_) | Stage::Duel(_) => {}
             }
         }
         // Everyone gets the whole screen again.
@@ -257,6 +264,12 @@ impl Handler for CrackAttack {
         let Some(seat) = self.seat_of(&p) else { return };
         self.catch_up(r.now_unix_nanos());
         match &mut self.stage {
+            // Nobody to wait for; a spectator just goes.
+            Stage::Duel(duel) if duel.against_computer_on() => {
+                if seat == 0 {
+                    self.finish(r);
+                }
+            }
             Stage::Duel(duel) if seat < 2 => {
                 if duel.suspended() {
                     // Nobody left to play.
@@ -278,7 +291,11 @@ impl Handler for CrackAttack {
         let Some(seat) = self.seat_of(&p) else { return };
         self.catch_up(r.now_unix_nanos());
         match &mut self.stage {
-            Stage::Waiting if seat == 0 && matches!(input, Input::Char('s' | 'S')) => self.start_solo(r),
+            Stage::Menu(menu) if seat == 0 => {
+                if let Some(choice) = menu.input(input) {
+                    self.start(r, choice);
+                }
+            }
             Stage::Solo(solo) if seat == 0 => {
                 if solo.game_over_shown() {
                     self.finish(r);
@@ -286,7 +303,8 @@ impl Handler for CrackAttack {
                     solo.input(input);
                 }
             }
-            Stage::Duel(duel) if seat < 2 => {
+            // Against the computer, side 1 is the AI: a second player only watches.
+            Stage::Duel(duel) if seat < 2 && !(duel.against_computer_on() && seat == 1) => {
                 if duel.suspended() {
                     self.finish(r);
                 } else {

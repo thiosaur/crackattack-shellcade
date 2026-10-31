@@ -3,8 +3,8 @@ seed: 42
 seats: 1
 heartbeat: 20ms
 steps:
-  - shot: waiting
-  - rune: "s"
+  - shot: menu
+  - key: enter
   - advance: 1s
   - shot: opening
   - key: right

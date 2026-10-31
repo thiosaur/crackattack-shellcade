@@ -32,8 +32,7 @@ impl Seat {
         self.keys |= map_input(input);
     }
 
-    /// Engine keys (`INPUT_*` bits) for the next tick: the AI, in tests.
-    #[cfg(test)]
+    /// Engine keys (`INPUT_*` bits) for the next tick: the computer's.
     pub(crate) fn press_keys(&mut self, keys: u8) {
         self.keys |= keys;
     }
