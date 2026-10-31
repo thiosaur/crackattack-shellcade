@@ -18,12 +18,18 @@ Le choix entre seul et à deux se fait dans l'arcade : elle propose « Solo »
 (une place) et « Duel » (partie rapide, ou salle privée sur invitation).
 
 Dans le jeu, un menu sous le logo propose le solo ou un duel contre l'ordinateur
-(l'IA du moteur : Logic, facile, ou Sigma, moyen). Dans une salle à deux places,
-ce menu est aussi l'écran d'attente : un adversaire qui arrive avant le choix
-lance le duel ; arrivé après, il regarde. Le niveau difficile (Cortex) n'est pas
-proposé : une de ses décisions peut dépasser les 100 ms qu'un appel a le droit de
-prendre en wasm (3,6 ms en natif au pire, contre 0,2 ms pour Sigma), et l'arcade
-coupe alors la salle.
+(l'IA du moteur : Logic, facile, Sigma, moyen, ou Cortex, difficile). Dans une
+salle à deux places, ce menu est aussi l'écran d'attente : un adversaire qui
+arrive avant le choix lance le duel ; arrivé après, il regarde.
+
+Cortex est ici une version allégée de celui du dépôt principal : sans le jeu
+pendant les chutes, sans les chaînes préparées en trois coups ni les combos
+x8/x10. Il est aussi fort en duel (51,8 % sur 500 parties contre le Cortex
+complet) et calcule bien moins (p99 de 106 à 44 µs par décision, pire tick
+0,43 ms en natif). Le Cortex complet dépassait parfois les 100 ms qu'un appel a
+le droit de prendre en wasm, et l'arcade coupait la salle ; l'allégé passe les
+mêmes essais. Le réglage est dans `crackattack-core/src/vs/grid_ai/tuning.rs`
+(journal S46 à S49 du dépôt principal).
 
 Le duel reprend le mode VS du moteur (manches, compte à rebours 3-2-1, déchets
 envoyés à l'autre, égalités). Les deux parties tournent dans le même module, au

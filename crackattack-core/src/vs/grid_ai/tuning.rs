@@ -219,7 +219,22 @@ impl AiTuning {
             },
             // Quick hands, tuned to about 600 points alone (journal S43, S44); the behaviour is
             // the measured one.
-            AIDifficulty::Hard => AiTuning { clear_setup: 3, cooldown: 4, move_gap: 1, move_jitter: 1, height_bias: 2, ..base },
+            // Shellcade only (the main repo keeps the full Hard): without the play during falls,
+            // the three-swap chains and the x8/x10 construction, it is as strong in duel (51.8 %
+            // against the full Hard over 500 games) for a third less work, p99 106 -> 44 µs
+            // (journal S49).
+            AIDifficulty::Hard => AiTuning {
+                clear_setup: 3,
+                cooldown: 4,
+                move_gap: 1,
+                move_jitter: 1,
+                height_bias: 2,
+                opportunism: false,
+                opportunism_linked: false,
+                chain_lookahead: false,
+                big_combo_setup_max_cost: 0,
+                ..base
+            },
         }
     }
 }

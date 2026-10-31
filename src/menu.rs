@@ -14,13 +14,12 @@ pub(crate) enum Choice {
     Computer(AIDifficulty),
 }
 
-/// The hard level (Cortex) is left out: one of its decisions can take over the 100 ms a
-/// callback is allowed in wasm (3.6 ms natively at worst, against 0.2 ms for Sigma), and
-/// the host then kills the room.
-const CHOICES: [Choice; 3] = [
+/// Every level. Cortex is the lean one of this version (see its tuning in the engine).
+const CHOICES: [Choice; 4] = [
     Choice::Solo,
     Choice::Computer(AIDifficulty::Easy),
     Choice::Computer(AIDifficulty::Medium),
+    Choice::Computer(AIDifficulty::Hard),
 ];
 
 impl Choice {
@@ -91,7 +90,7 @@ mod tests {
         let mut menu = Menu::new();
         assert_eq!(menu.input(Input::Key(Key::Enter)), Some(Choice::Solo));
         menu.input(Input::Key(Key::Up));
-        assert_eq!(menu.input(Input::Char(' ')), Some(Choice::Computer(AIDifficulty::Medium)));
+        assert_eq!(menu.input(Input::Char(' ')), Some(Choice::Computer(AIDifficulty::Hard)));
         menu.input(Input::Key(Key::Down));
         menu.input(Input::Key(Key::Down));
         assert_eq!(menu.input(Input::Key(Key::Enter)), Some(Choice::Computer(AIDifficulty::Easy)));
