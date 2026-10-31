@@ -1,0 +1,17 @@
+# Scripted screens: `tools/shellcade-kit smoke .` (the catalog CI runs it on each PR).
+seed: 42
+seats: 1
+heartbeat: 20ms
+steps:
+  - advance: 1s
+  - shot: opening
+  - key: right
+  - key: space
+  - advance: 400ms
+  - shot: swapped
+  - key: enter
+  - advance: 10s
+  - shot: risen
+  - rune: "p"
+  - advance: 1s
+  - shot: paused

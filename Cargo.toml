@@ -1,0 +1,46 @@
+# Crack Attack! for shellcade: the game, as a wasm module for the shellcade arcade (80×24
+# terminal canvas, played over SSH).
+#
+# The root is both the game crate and the workspace: `shellcade-kit play .` builds it and
+# finds its artifact in target/wasm32-wasip1/release/.
+
+[workspace]
+resolver = "2"
+members = [".", "crackattack-core"]
+
+# Inherited by crackattack-core, copied unchanged from the main repository.
+[workspace.package]
+version = "2.0.0-beta.4"
+edition = "2021"
+# GPL v3 or later. The original Crack Attack! 1.1.14 is GPL v2 or later, which allows a
+# derivative work to move to version 3.
+license = "GPL-3.0-or-later"
+publish = false
+rust-version = "1.85"
+
+[workspace.dependencies]
+bitflags = "2.4"
+
+[package]
+name = "crackattack"
+description = "Crack Attack! for the shellcade terminal arcade"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lib]
+# cdylib: the wasm artifact; rlib: `cargo test`, natively.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+crackattack-core = { path = "crackattack-core" }
+shellcade-kit = { git = "https://github.com/shellcade/kit", tag = "v2.17.1" }
+
+# Profiles apply only at the leaf crate: the size and panic settings shellcade expects.
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+panic = "abort"
